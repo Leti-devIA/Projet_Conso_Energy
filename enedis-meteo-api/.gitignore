@@ -1,0 +1,42 @@
+# Environnements virtuels
+venv/
+.venv/
+env/
+env_api/
+
+# Fichiers d'environnement (secrets)
+.env
+.env.*
+
+# Cache Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs
+*.log
+
+# Tests / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+
+exports/
+
+# IDE / éditeurs
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Bases de données locales
+*.sqlite3
+
+# Fichiers temporaires
+*.tmp
+
+*.json text eol=lf
+*.ts   text eol=lf
