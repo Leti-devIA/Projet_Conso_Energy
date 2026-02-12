@@ -9,13 +9,18 @@ import plotly.express as px
 from datetime import datetime, timedelta
 from pathlib import Path
 import json
+import sys
+
+# Ajouter src au path
+sys.path.insert(0, str(Path(__file__).parent / 'src'))
+from data_loader import get_data_loader
 
 # Configuration de la page
 st.set_page_config(
-    page_title="Dashboard Prédictions 3 ans",
+    page_title="Dashboard Prédictions Énergétiques",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
 # Styles CSS personnalisés
@@ -36,12 +41,55 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# Titre principal
-st.title("Dashboard de Prédictions - Juvigny les Vallées -")
+# Initialiser le DataLoader
+@st.cache_resource
+def get_loader():
+    """Charge et cache le DataLoader."""
+    return get_data_loader('csv', 'config/config.yaml')
+
+# Charger les sites disponibles
+@st.cache_data
+def load_sites_info():
+    """Charge la table des sites avec leurs informations."""
+    loader = get_loader()
+    sites_df = loader.load_sites_table()
+    return sites_df
+
+# Titre principal avec sélection de site
+sites_df = load_sites_info()
+available_prms = sites_df['prm'].astype(str).tolist() if not sites_df.empty else []
+
+# Sidebar pour sélectionner le site
+st.sidebar.header("⚙️ Configuration")
+if available_prms:
+    # Créer un dictionnaire prm -> ville pour l'affichage
+    prm_to_city = {str(row['prm']): row['ville'] for _, row in sites_df.iterrows()}
+
+    # Sélection du site avec affichage de la ville
+    selected_display = st.sidebar.selectbox(
+        "Sélectionner un site",
+        options=[f"{prm_to_city[prm]} (PRM: {prm})" for prm in available_prms],
+        index=0
+    )
+
+    # Extraire le PRM sélectionné
+    selected_prm = selected_display.split("PRM: ")[1].rstrip(")")
+
+    # Récupérer les infos du site
+    site_info = sites_df[sites_df['prm'] == int(selected_prm)].iloc[0]
+
+    # Afficher le titre avec la ville
+    st.title(f"📊 Dashboard - {site_info['ville']}")
+    st.markdown(f"**Code postal:** {site_info['code_postal']} | **PRM:** {selected_prm}")
+else:
+    st.title("📊 Dashboard de Prédictions Énergétiques")
+    selected_prm = None
+    st.warning("⚠️ Aucun site trouvé dans la table des sites")
+
 st.markdown("Visualisation des prédictions de consommation énergétique")
 
 # Sidebar
-st.sidebar.header("⚙️ Configuration")
+st.sidebar.markdown("---")
 
 # Fonction de chargement des données
 @st.cache_data

@@ -2,6 +2,15 @@
 
 Modèle LSTM pour la prédiction horaire de consommation énergétique avec 48h de fenêtre glissante.
 
+## � Nouveautés - Architecture Multi-Sites
+
+- ✅ **Support multi-sites** : Entraînez des modèles pour plusieurs sites (PRM) automatiquement
+- ✅ **DataLoader modulaire** : Architecture flexible pour CSV (actuel) et base de données (futur)
+- ✅ **Organisation améliorée** : Structure `data/raw` avec sous-dossiers (sites, meteo, prix)
+- ✅ **Migration facile** : Script de migration pour organiser vos fichiers existants
+
+📖 **Documentation complète** : Voir [DATA_ARCHITECTURE.md](DATA_ARCHITECTURE.md)
+
 ## 🏗️ Structure du Projet
 
 ```
@@ -9,13 +18,17 @@ Modeles_TimesSeries/
 ├── config/
 │   └── config.yaml              # Configuration centralisée
 ├── data/
-│   ├── raw/                     # Données brutes
+│   ├── raw/                     # 🆕 Données brutes organisées
+│   │   ├── sites/              # Fichiers dataclean_prm_*.csv
+│   │   ├── meteo/              # Fichiers météo
+│   │   └── prix/               # Fichiers prix spot
 │   ├── processed/               # Données prétraitées
 │   └── predictions/             # Prédictions sauvegardées
 ├── models/
-│   └── saved/                   # Modèles entraînés
+│   └── saved/                   # Modèles entraînés (par site)
 ├── src/
 │   ├── __init__.py
+│   ├── data_loader.py          # 🆕 Chargement des données (CSV/DB)
 │   ├── preprocessing.py         # Nettoyage et conversion
 │   ├── feature_engineering.py  # Création des features
 │   ├── model.py                # Architecture LSTM
@@ -24,6 +37,8 @@ Modeles_TimesSeries/
 │   └── utils.py                # Fonctions utilitaires
 ├── notebooks/                   # Notebooks d'exploration
 ├── main.py                      # Point d'entrée CLI
+├── migrate_data.py             # 🆕 Script de migration des données
+├── DATA_ARCHITECTURE.md        # 🆕 Documentation architecture
 └── requirements.txt             # Dépendances
 ```
 
@@ -33,16 +48,58 @@ Modeles_TimesSeries/
 pip install -r requirements.txt
 ```
 
+## 📂 Préparation des Données
+
+### Option 1 : Migration automatique (recommandé)
+
+Si vous avez déjà des fichiers CSV dans `../data/dataclean/` :
+
+```bash
+python migrate_data.py
+```
+
+Ce script copiera automatiquement vos fichiers dans la nouvelle structure.
+
+### Option 2 : Copie manuelle
+
+Copiez vos fichiers dans la nouvelle structure :
+
+```bash
+# Sites (fichiers dataclean_prm_*.csv)
+cp ../data/dataclean/dataclean_prm_*.csv data/raw/sites/
+
+# Météo
+cp ../data/dataclean/previsions_meteo.csv data/raw/meteo/
+
+# Prix
+cp ../data/dataclean/prix_spot.csv data/raw/prix/
+```
+
+### Vérification
+
+```bash
+python main.py list-sites
+```
+
 ## 📊 Utilisation
+
+### Lister les sites disponibles
+
+```bash
+python main.py list-sites
+```
 
 ### Entraînement
 
 ```bash
-# Pipeline complet
-python main.py train --data dataFE_prm_30000250086126.csv
+# Entraîner un site spécifique
+python main.py train --prm 30000250086126
+
+# Entraîner tous les sites disponibles
+python main.py train --all-sites
 
 # Sans preprocessing/features (déjà fait)
-python main.py train --data data/processed/data_with_features.csv --skip-preprocessing --skip-features
+python main.py train --prm 30000250086126 --skip-preprocessing --skip-features
 ```
 
 ### Prédiction
