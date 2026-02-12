@@ -1,16 +1,13 @@
 # 📊 Projet Consommation Energetique - API
 
-API REST FastAPI pour l'export de données de consommation énergétique d'ENEDIS et données météorologiques nettoyées, connectée à Microsoft Fabric Warehouse.
+API REST FastAPI pour l'export de données de consommation énergétique, météo et prix spot depuis Microsoft Fabric Warehouse.
 
 ## 🚀 Fonctionnalités
 
-- **Export de données par PRM** : Récupération complète des données pour un Point de Référence Mesure (PRM) donné
-- **Export des prévisions météo** : Récupération complète de toutes les prévisions météorologiques
-- **Inspection des colonnes** : Vérification de la structure de la table en temps réel
-- **Streaming en temps réel** : Téléchargement progressif sans saturation mémoire
-- **Format CSV** : Export standardisé pour analyse dans Excel, Python, R, etc.
-- **Gestion de gros volumes** : Traitement optimisé par batch pour des millions de lignes
-- **Authentification Azure AD** : Connexion sécurisée via ActiveDirectoryInteractive
+- Export CSV par PRM, prévisions météo, sites et prix spot
+- Streaming en temps réel sans saturation mémoire
+- Authentification Azure AD sécurisée
+- Traitement optimisé pour gros volumes
 
 ## 🏗️ Architecture
 
@@ -33,73 +30,32 @@ API REST FastAPI pour l'export de données de consommation énergétique d'ENEDI
 
 ## 🛠️ Stack Technique
 
-- **Framework** : FastAPI 0.104+
-- **Serveur** : Uvicorn (ASGI)
-- **Base de données** : Microsoft Fabric Warehouse (SQL Server)
-- **Driver** : pyodbc avec ODBC Driver 17 for SQL Server
-- **Authentification** : Azure Active Directory Interactive
-- **Async** : asyncio avec run_in_executor pour opérations pyodbc
+FastAPI 0.104+ · Uvicorn · Microsoft Fabric Warehouse · pyodbc · Azure AD · asyncio
 
 ## 🔧 Installation
 
 ### 1. Prérequis
 - **Python 3.8+**
 - **ODBC Driver 17 for SQL Server** ([Télécharger](https://go.microsoft.com/fwlink/?linkid=2249004))
-- **Accès à Microsoft Fabric Warehouse** (réseau entreprise ou VPN)
-- **Compte Azure AD** avec permissions sur le Warehouse
-
-### 2. Installation des dépendances
+- **Accès à Micros & Démarrage
 
 ```bash
-# Créer l'environnement virtuel
+# Créer et activer l'environnement virtuel
 python -m venv env_api
-
-# Activer l'environnement
-.\env_api\Scripts\Activate  # Windows PowerShell
-# ou
-env_api\Scripts\activate.bat  # Windows CMD
-# ou
-source env_api/bin/activate  # Linux/Mac
+.\env_api\Scripts\Activate.ps1  # Windows
 
 # Installer les dépendances
 pip install -r requirements.txt
-```
 
-### 3. Configuration
-
-Créez un fichier `.env` à la racine :
-
-```env
-DB_SERVER=dnmqtfgsjw7ejbm2qgflaq64vm-tbkwk7v224xe5klpmn6vd3cnfi.datawarehouse.fabric.microsoft.com
+# Configurer .env
+DB_SERVER=votre-serveur.datawarehouse.fabric.microsoft.com
 DB_DATABASE=LH_Projet_Conso_Energie
-```
 
-**⚠️ Important** : Ne jamais commiter le fichier `.env` !
-
-### 4. Démarrage
-
-```bash
-# Lancer l'API en mode développement
+# Lancer l'API
 uvicorn app.main:app --reload --port 8000
-
-# Ou via Python directement
-python app/main.py
 ```
 
-L'API sera accessible sur : **http://127.0.0.1:8000**
-
-## 📖 Documentation
-
-### Interface Swagger
-Documentation interactive complète : **http://127.0.0.1:8000/docs**
-
-### ReDoc
-Documentation alternative : **http://127.0.0.1:8000/redoc**
-
-## 🌐 Endpoints
-
-### **GET** `/`
-
+**Documentation Swagger** : http://127.0.0.1:8000/docs
 Point d'entrée de l'API.
 
 #### Réponse
@@ -134,121 +90,48 @@ GET /dataclean/allbyprm?prm=30000250086126
 - **Mode** : Streaming (téléchargement progressif)
 - **Source** : Table `dbo.ENEDIS_METEO_CLEAN`
 
-#### Codes de réponse
-
-| Code | Description                    |
-|------|--------------------------------|
-| 200  | Export réussi                  |
-| 503  | Base de données non disponible |
-| 500  | Erreur lors de l'export        |
-| 422  | Paramètre manquant ou invalide |
-
----
-
-### **GET** `/dataclean/columns`
-
-Retourne la liste des colonnes disponibles dans la table `ENEDIS_METEO_CLEAN`.
-
-#### Exemple d'utilisation
+#### Codes de dataclean/allbyprm`
+Export CSV des données pour un PRM spécifique avec streaming.
 
 ```bash
-GET /dataclean/columns
+curl "http://127.0.0.1:8000/dataclean/allbyprm?prm=30000250086126" -o export.csv
 ```
 
-#### Réponse
-
-```json
-{
-  "columns": [
-    "prm",
-    "date",
-    "heure",
-    "consommation",
-    "temperature",
-    ...
-  ],
-  "count": 15
-}
-```
-
-#### Utilité
-
-- Vérifier la structure de la table
-- Identifier les colonnes disponibles pour les analyses
-- Valider les noms de colonnes avant les requêtes
+**Paramètres** : `prm` (string, obligatoire)
+**Fichier** : `dataclean_prm_{prm}.csv`
 
 ---
 
 ### **GET** `/dataclean/previsions-meteo`
-
-Export complet de toutes les prévisions météorologiques au format CSV avec streaming.
-
-#### Paramètres
-
-Aucun paramètre requis.
-
-#### Exemple d'utilisation
+Export CSV de toutes les prévisions météo.
 
 ```bash
-GET /dataclean/previsions-meteo
+curl "http://127.0.0.1:8000/dataclean/previsions-meteo" -o previsions_meteo.csv
 ```
 
-#### Réponse
-
-- **Format** : CSV (text/csv)
-- **Nom du fichier** : `previsions_meteo.csv`
-- **Mode** : Streaming (téléchargement progressif)
-- **Source** : Table `dbo.PREVISIONS_METEO`
-
-#### Codes de réponse
-
-| Code | Description                    |
-|------|--------------------------------|
-| 200  | Export réussi                  |
-| 503  | Base de données non disponible |
-| 500  | Erreur lors de l'export        |
-
-#### Utilité
-
-- Récupérer l'ensemble des données de prévisions météo
-- Analyser les prévisions météorologiques sur l'ensemble des PRM
-- Export pour traitement externe (analyse, ML, visualisation)
+**Fichier** : `previsions_meteo.csv`
 
 ---
 
-## 🔍 Fonctionnement technique
+### **GET** `/dataclean/sites`
+Export CSV de tous les sites de l'entreprise.
 
-### Architecture Async
-
-L'API utilise une architecture asynchrone pour optimiser les performances :
-
-```python
-# Exécution de pyodbc (synchrone) dans un executor
-loop = asyncio.get_event_loop()
-cursor, columns = await loop.run_in_executor(
-    None, 
-    get_rows_by_prm, 
-    connection, 
-    prm
-)
+```bash
+curl "http://127.0.0.1:8000/dataclean/sites" -o table_sites.csv
 ```
 
-**Avantages** :
-- ✅ Pas de blocage de la boucle événementielle
-- ✅ Gestion de multiples requêtes simultanées
-- ✅ Meilleure scalabilité
+**Fichier** : `table_sites.csv`
 
-### Streaming Response
+---
 
-L'API utilise **FastAPI StreamingResponse** pour :
-- ✅ Éviter la saturation mémoire
-- ✅ Commencer le téléchargement immédiatement  
-- ✅ Traiter des millions de lignes
-- ✅ Éviter les timeouts
+### **GET** `/dataclean/prixspot`
+Export CSV des prix spot de l'électricité.
 
-### Traitement par batch
+```bash
+curl "http://127.0.0.1:8000/dataclean/prixspot" -o prix_spot.csv
+```
 
-```python
+**Fichier** : `prix_spot.csv`
 # Traitement par paquets de 10 000 lignes
 batch_size = 10_000
 for row in cursor:
@@ -264,7 +147,7 @@ for row in cursor:
 class DatabaseManager:
     # Connexion unique réutilisée
     self._connection: Optional[pyodbc.Connection] = None
-    
+
     # Lock async pour thread-safety
     self._lock = asyncio.Lock()
 ```
@@ -325,72 +208,12 @@ print(columns_response.json())
 
 # Export des prévisions météo
 meteo_response = requests.get("http://127.0.0.1:8000/dataclean/previsions-meteo", stream=True)
-if meteo_response.status_code == 200:
-    with open("previsions_meteo.csv", "wb") as f:
-        for chunk in meteo_response.iter_content(chunk_size=8192):
-            f.write(chunk)
-    print("✅ Prévisions météo exportées !")
-```
+if ⚡ Architecture
 
-### Python avec pandas
-```python
-import pandas as pd
-
-# Charger directement le CSV dans un DataFrame
-prm = "30000250086126"
-url = f"http://127.0.0.1:8000/dataclean/allbyprm?prm={prm}"
-
-df = pd.read_csv(url)
-print(f"📊 {len(df)} lignes chargées")
-print(df.head())
-
-# Charger les prévisions météo
-df_meteo = pd.read_csv("http://127.0.0.1:8000/dataclean/previsions-meteo")
-print(f"📊 {len(df_meteo)} prévisions météo chargées")
-print(df_meteo.head())
-```
-
-### JavaScript/Fetch
-```javascript
-// Export CSV
-const prm = '30000250086126';
-const response = await fetch(`http://127.0.0.1:8000/dataclean/allbyprm?prm=${prm}`);
-
-if (response.ok) {
-    const blob = await response.blob();
-    const url = window.URL.createObjectURL(blob);
-    
-    // Téléchargement automatique
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `dataclean_prm_${prm}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    window.URL.revokeObjectURL(url);
-} else {
-    console.error('Erreur:', response.statusText);
-}
-
-// Obtenir les colonnes
-const columnsResponse = await fetch('http://127.0.0.1:8000/dataclean/columns');
-const columns = await columnsResponse.json();
-console.log('Colonnes disponibles:', columns);
-
-// Export des prévisions météo
-const meteoResponse = await fetch('http://127.0.0.1:8000/dataclean/previsions-meteo');
-if (meteoResponse.ok) {
-    const blob = await meteoResponse.blob();
-    const url = window.URL.createObjectURL(blob);
-    
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'previsions_meteo.csv';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    window.URL.revokeObjectURL(url);
-}
+- **Async** : pyodbc synchrone exécuté dans un executor asyncio
+- **Streaming** : StreamingResponse avec traitement par batch (10k lignes)
+- **Connexion** : Pool persistant avec reconnexion automatique et Azure AD
+- **Performance** : Mémoire constante ~50MB, traitement illimité
 ```
 
 ## 🔒 Sécurité
@@ -443,7 +266,7 @@ L'API accepte toutes les origines (`allow_origins=["*"]`) :
 
 ### Métriques typiques
 - **100k lignes** : ~30 secondes
-- **1M lignes** : ~5 minutes  
+- **1M lignes** : ~5 minutes
 - **10M lignes** : ~45 minutes
 - **Mémoire serveur** : ~50MB constant
 
@@ -564,57 +387,9 @@ export DB_DATABASE="votre-base-prod"
 ```bash
 pip install gunicorn
 
-gunicorn app.main:app \
-  -k uvicorn.workers.UvicornWorker \
-  --bind 0.0.0.0:8000 \
-  --workers 4 \
-  --timeout 120
-```
-
-#### 3. Démarrage avec Uvicorn (production)
-```bash
-uvicorn app.main:app \
-  --host 0.0.0.0 \
-  --port 8000 \
-  --workers 4 \
-  --no-access-log \
-  --log-level warning
-```
-
-### Docker (optionnel)
-
-#### Dockerfile
-```dockerfile
-FROM python:3.11-slim
-
-# Installer les dépendances système
-RUN apt-get update && apt-get install -y \
-    curl \
-    gnupg \
-    unixodbc \
-    unixodbc-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Installer ODBC Driver 17 pour SQL Server
-RUN curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - \
-    && curl https://packages.microsoft.com/config/debian/11/prod.list > /etc/apt/sources.list.d/mssql-release.list \
-    && apt-get update \
-    && ACCEPT_EULA=Y apt-get install -y msodbcsql17 \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
-
-# Copier les dépendances
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copier le code
-COPY . .
-
-# Exposer le port
-EXPOSE 8000
-
-# Démarrer l'application
+- **Auth** : Azure AD Interactive (tokens temporaires, reconnexion auto)
+- **Réseau** : Nécessite réseau entreprise ou VPN
+- **Config** : Variables sensibles dans `.env` (ne pas commiter)
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
@@ -630,116 +405,48 @@ services:
     environment:
       - DB_SERVER=${DB_SERVER}
       - DB_DATABASE=${DB_DATABASE}
-    restart: unless-stopped
-```
+    Problèmes courants
 
-#### Construire et lancer
-```bash
-docker-compose up -d
-```
+| Erreur | Solution |
+|--------|----------|
+| Connection failed | Vérifier VPN/réseau entreprise |
+| 503 Unavailable | Vérifier `.env` et connexion Azure |
+| Unable to create process | Recréer l'environnement : `python -m venv env_api` |
+| ODBC Driver missing | [Télécharger ODBC Driver 17](https://go.microsoft.com/fwlink/?linkid=2249004) |
 
-### Systemd Service (Linux)
-
-```ini
-# /etc/systemd/system/enedis-api.service
-[Unit]
-Description=Enedis Meteo API
-After=network.target
-
-[Service]
-Type=notify
-User=www-data
-WorkingDirectory=/opt/enedis-meteo-api
-Environment="DB_SERVER=..."
-Environment="DB_DATABASE=..."
-ExecStart=/opt/enedis-meteo-api/env_api/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl enable enedis-api
-sudo systemctl start enedis-api
-sudo systemctl status enedis-api
-```
-
-### Monitoring
-
-#### Healthcheck endpoint
-Ajoutez dans [main.py](app/main.py) :
+### Test de connexion
 ```python
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy", "version": "1.0.0"}
+import pyodbc, os
+from dotenv import load_dotenv
+
+load_dotenv()
+conn = pyodbc.connect(
+    f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+    f"SERVER={os.getenv('DB_SERVER')};"
+    f"DATABASE={os.getenv('DB_DATABASE')};"
+    f"Authentication=ActiveDirectoryInteractive;"
+)
+print("✅ Connexion OK")
 ```
-
-#### Logs
-```bash
-# Suivre les logs en temps réel
-tail -f logs/api.log
-
-# Ou avec systemd
-journalctl -u enedis-api -f
-```
-
-## 👥 Support & Contributions
-
-### Obtenir de l'aide
-
-1. **Consultez la documentation Swagger** : http://127.0.0.1:8000/docs
-2. **Vérifiez les logs** dans le terminal où uvicorn tourne
-3. **Testez la connexion** avec l'endpoint `/dataclean/columns`
-4. **Consultez la section Dépannage** ci-dessus
-
-### Structure du projet
-
-```
-app/
-├── config/
-│   └── database.py         # DatabaseManager avec connexion persistante
-├── routers/
-│   └── dataclean.py        # Endpoints FastAPI
-├── services/
-│   └── csv_export.py       # Streaming CSV par batch
-├── repository/
-│   └── data_repository.py  # Requêtes SQL
-└── main.py                 # Point d'entrée FastAPI
-```
-
-### Technologies utilisées
-
-| Composant | Technologie | Version |
-|-----------|------------|---------|
-| Framework | FastAPI | 0.104+ |
-| Serveur | Uvicorn | 0.24+ |
-| Base de données | Microsoft Fabric Warehouse | - |
-| Driver | pyodbc | 5.0+ |
-| Auth | Azure Active Directory | - |
-| Python | CPython | 3.8+ |
 
 ---
 
 ## 📝 Changelog
 
+### Version 1.2.0 (Février 2026)
+- ✅ Export des prix spot (`/prixspot`)
+- ✅ Export des sites (`/sites`)
+
 ### Version 1.1.0 (Janvier 2026)
-- ✅ Export de toutes les prévisions météo (`/previsions-meteo`)
-- ✅ Streaming CSV pour données volumineuses
+- ✅ Export prévisions météo (`/previsions-meteo`)
+- ✅ Streaming CSV optimisé
 
 ### Version 1.0.0 (Janvier 2026)
-- ✅ Connexion à Microsoft Fabric Warehouse
-- ✅ Authentification Azure AD Interactive
-- ✅ Export CSV par PRM avec streaming
-- ✅ Endpoint pour lister les colonnes
-- ✅ Gestion async avec pyodbc
-- ✅ Reconnexion automatique
-- ✅ Logs de débogage détaillés
-- ✅ Documentation Swagger complète
+- ✅ Export CSV par PRM
+- ✅ Connexion Microsoft Fabric + Azure AD
 
 ---
 
-**Développé pour** : Projet Consommation Énergétique  
-**Base de données** : `LH_Projet_Conso_Energie` (Microsoft Fabric)  
-**Version** : 1.1.0  
-**Dernière mise à jour** : Janvier 2026
+**Base de données** : `LH_Projet_Conso_Energie` (Microsoft Fabric)
+**Version** : 1.2.0
+**Dernière mise à jour** : Févr
