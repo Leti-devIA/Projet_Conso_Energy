@@ -36,3 +36,16 @@ def get_all_sites(connection):
 
     columns = [col[0] for col in cursor.description]
     return cursor, columns
+
+
+def get_all_prix_spot(connection):
+    cursor = connection.cursor()
+
+    query = """
+        SELECT *
+        FROM dbo.PREVISIONS_PRIX
+    """
+    cursor.execute(query)
+
+    columns = [col[0] for col in cursor.description]
+    return cursor, columns

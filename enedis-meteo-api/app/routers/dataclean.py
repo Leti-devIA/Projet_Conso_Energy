@@ -2,7 +2,7 @@ from fastapi import APIRouter, Query, HTTPException
 from fastapi.responses import StreamingResponse
 from app.config.database import get_database_connection
 from app.services.csv_export import stream_rows_to_csv
-from app.repository.data_repository import get_rows_by_prm, get_all_previsions_meteo, get_all_sites
+from app.repository.data_repository import get_rows_by_prm, get_all_previsions_meteo, get_all_sites, get_all_prix_spot
 import asyncio
 import traceback
 
@@ -116,6 +116,44 @@ async def export_sites():
             media_type="text/csv",
             headers={
                 "Content-Disposition": "attachment; filename=table_sites.csv"
+            }
+        )
+
+    except Exception as e:
+        print(f"❌ ERREUR COMPLÈTE: {type(e).__name__}: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Erreur lors de l'export: {str(e)}")
+
+
+@router.get("/prixspot")
+async def export_prix_spot():
+    """Export de toutes les prix spot au format CSV"""
+    print("📥 Requête reçue pour export des prix spot")
+
+    connection = await get_database_connection()
+    if not connection:
+        print("❌ Pas de connexion à la base de données")
+        raise HTTPException(status_code=503, detail="Base de données non disponible")
+
+    try:
+        print("✅ Connexion établie, exécution de la requête SQL...")
+
+        # Exécuter la requête dans un executor car pyodbc est synchrone
+        loop = asyncio.get_event_loop()
+        cursor, columns = await loop.run_in_executor(
+            None,
+            get_all_prix_spot,
+            connection
+        )
+
+        print(f"📊 Colonnes trouvées: {columns}")
+        print(f"✅ Génération du CSV...")
+
+        return StreamingResponse(
+            stream_rows_to_csv(cursor, columns),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": "attachment; filename=prix_spot.csv"
             }
         )
 
