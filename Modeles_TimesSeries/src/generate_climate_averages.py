@@ -25,6 +25,8 @@ import pandas as pd
 import numpy as np
 import yaml
 from pathlib import Path
+import sys
+
 
 
 def load_config(config_path="config/config.yaml"):
@@ -223,19 +225,21 @@ def generate_future_meteo(start_date, nb_heures, meteo_moyenne, add_variability=
     return meteo_future
 
 
-def generate_climate_averages_pipeline(historique_path, output_path=None,
+def generate_climate_averages_pipeline(historique_path=None, output_path=None,
                                        start_date=None, nb_annees=3,
-                                       add_variability=True, config_path="config/config.yaml"):
+                                       add_variability=True, config_path="config/config.yaml",
+                                       prm=None):
     """
     Pipeline complet pour générer des données météo moyennes pour prédictions long terme.
 
     Args:
-        historique_path: Chemin vers les données historiques
+        historique_path: Chemin vers les données historiques (si None, utilise prm)
         output_path: Chemin de sortie (optionnel)
         start_date: Date de début (si None, utilise la dernière date de l'historique + 1h)
         nb_annees: Nombre d'années à générer
         add_variability: Ajouter de la variabilité aléatoire
         config_path: Chemin vers la configuration
+        prm: PRM du site (si fourni, charge automatiquement le dataclean correspondant)
 
     Returns:
         DataFrame avec données météo moyennes
@@ -244,8 +248,15 @@ def generate_climate_averages_pipeline(historique_path, output_path=None,
     print("🌍 GÉNÉRATION D’UN CLIMAT FUTUR SYNTHÉTIQUE")
     print("   (Basé sur climat historique + tendances climatiques)")
     print("=" * 80)
-
-
+    # Si prm est fourni, charger automatiquement le fichier dataclean correspondant
+    if prm is not None:
+        if historique_path is None:
+            historique_path = f"data/raw/sites/dataclean_prm_{prm}.csv"
+            print(f"\n📍 PRM fourni : {prm}")
+            print(f"   → Chargement automatique : {historique_path}")
+        if output_path is None:
+            output_path = f"data/raw/meteo/meteo_moyennes_3ans_{prm}.csv"
+            print(f"   → Sortie automatique : {output_path}")
     # Charger l'historique
     print(f"\n📂 Chargement de l'historique : {historique_path}")
     historique = pd.read_csv(historique_path)
@@ -320,8 +331,38 @@ def generate_climate_averages_pipeline(historique_path, output_path=None,
 
 
 if __name__ == "__main__":
-    # Exemple d'utilisation
-    historique_path = "dataFE_prm_30000250086126.csv"
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Génération de prévisions météo climatiques pour un site"
+    )
+    parser.add_argument('--prm', type=str, help='Code PRM du site')
+    parser.add_argument('--historique', type=str, help='Chemin vers historique météo (optionnel si --prm fourni)')
+    parser.add_argument('--output', type=str, help='Chemin de sortie (optionnel)')
+    parser.add_argument('--nb-annees', type=int, default=3, help='Nombre d\'années à générer (défaut: 3)')
+    parser.add_argument('--start-date', type=str, help='Date de début (format YYYY-MM-DD)')
+    parser.add_argument('--no-variability', action='store_true', help='Désactiver la variabilité')
+
+    args = parser.parse_args()
+
+    if not args.prm and not args.historique:
+        print("❌ Vous devez spécifier --prm ou --historique")
+        parser.print_help()
+        sys.exit(1)
+
+    start_date = pd.Timestamp(args.start_date) if args.start_date else None
+
+    generate_climate_averages_pipeline(
+        prm=args.prm,
+        historique_path=args.historique,
+        output_path=args.output,
+        start_date=start_date,
+        nb_annees=args.nb_annees,
+        add_variability=not args.no_variability
+    )
+
+    # Exemple d'utilisation (code original commenté)
+    # historique = "dataFE_prm_30000250086126.csv"
     output_path = "data/raw/meteo/meteo_moyennes_3ans.csv"
 
     # Générer 3 ans de données météo moyennes

@@ -10,14 +10,22 @@ Le dashboard `dashboard_longterm.py` est un outil interactif de visualisation de
 # 1. Installer les dépendances
 pip install streamlit plotly
 
-# 2. Générer les prédictions (si pas déjà fait)
-python main.py predict-longterm --historique dataFE_prm_30000250086126.csv --years 3 --add-trend
+# 2. Générer les prédictions pour un site
+python main.py predict-longterm --prm 30000540191777 --years 3 --add-trend
+
+# OU générer pour tous les sites
+python generate_all_predictions.py
 
 # 3. Lancer le dashboard
 streamlit run dashboard_longterm.py
 ```
 
 Le dashboard s'ouvre automatiquement dans votre navigateur sur http://localhost:8501
+
+### 🔍 Sélection du site
+
+Le dashboard détecte automatiquement tous les sites avec des prédictions disponibles dans `data/predictions/`.
+Utilisez le menu déroulant en haut à gauche pour **sélectionner le site** que vous souhaitez visualiser.
 
 ## 📋 Fonctionnalités Principales
 
@@ -37,7 +45,51 @@ Le dashboard s'ouvre automatiquement dans votre navigateur sur http://localhost:
 
 **Cliquez sur "Comprendre ces métriques"** pour des explications détaillées.
 
-### 📊 Section 2 : Comparaison Historique vs Prédictions
+### � Section 2 : Pilotage Budgétaire
+
+**Analyse complète des coûts d'achat d'électricité** selon votre stratégie de couverture contractuelle (Base/Peak) et les achats complémentaires sur le marché spot.
+
+#### Configuration des paramètres
+
+Dans la sidebar, définissez :
+- **Volumes Base** (kW) : Volume contractuel permanent (24h/24, 7j/7)
+- **Volumes Peak** (kW) : Volume contractuel additionnel en heures pleines (8h-20h, lundi-vendredi)
+- **Prix Base** (€/MWh) : Prix contractuel pour le volume Base
+- **Prix Peak** (€/MWh) : Prix contractuel pour le volume Peak
+- **TURPE** (€/kWh) : Tarif d'acheminement réseau
+- **Taxes** (%) : TVA et autres taxes
+
+#### Vue d'ensemble budgétaire
+
+**5 KPIs essentiels** :
+- **Volume total** : Consommation totale prévue (MWh)
+- **Coût total** : Budget électricité total (€)
+- **Prix moyen** : Coût moyen au MWh (€/MWh)
+- **Taux de couverture** : % de la consommation couverte par les contrats Base/Peak
+- **Exposition spot** : % de la consommation achetée sur le marché spot
+
+#### 3 onglets d'analyse
+
+**📦 Onglet Volumes** :
+- Graphique empilé : Base / Peak / Achat Spot / Vente Spot par mois
+- Diagramme circulaire : Répartition globale des volumes
+
+**💰 Onglet Coûts** :
+- Graphique empilé : Coût couverture / Achat spot / Crédit vente par mois
+- 3 métriques : Coût couverture (%) / Achat Spot (%) / Crédit Vente (%)
+
+**📈 Onglet Prix** :
+- Évolution prix moyen global vs prix contractuels (Base/Peak) vs prix spot
+- Évolution du taux de couverture mensuel (ligne à 100% = couverture complète)
+
+#### Export du rapport
+
+Téléchargez un fichier CSV avec le détail mensuel :
+- Volumes : consommation réelle, base, peak, spot (achat/vente)
+- Coûts : total, couverture, spot (achat/vente)
+- Prix : moyens (global, spot) et taux de couverture
+
+### 📊 Section 3 : Comparaison Historique vs Prédictions
 
 **3 onglets de comparaison** :
 
@@ -55,7 +107,7 @@ Le dashboard s'ouvre automatiquement dans votre navigateur sur http://localhost:
    - Patterns journaliers moyens
    - Vérification des pics matin/soir
 
-### 📈 Section 3 : Évolution Temporelle
+### 📈 Section 4 : Évolution Temporelle
 
 **Visualisations détaillées** :
 - **Vue Mensuelle** : Moyennes, max, min par mois
@@ -65,20 +117,20 @@ Le dashboard s'ouvre automatiquement dans votre navigateur sur http://localhost:
 🟢 **Historique** = trait plein vert
 🟠 **Prédictions** = trait pointillé orange
 
-### 📊 Section 4 : Comparaison par Année
+### 📊 Section 5 : Comparaison par Année
 
 - **Tableaux détaillés** : Statistiques séparées historique/prédictions
 - **Graphiques barres** : Comparaison visuelle des moyennes
 - **Croissance annuelle** : % d'évolution année par année
 
-### 🔥 Section 5 : Analyses Avancées
+### 🔥 Section 6 : Analyses Avancées
 
 **Heatmaps et distributions** :
 - **Heatmap Mois × Heure** : Identifier les pics de consommation
 - **Distributions** : Histogrammes et box plots par année
 - **Patterns Hebdomadaires** : Jour × Heure pour voir les différences semaine/weekend
 
-### 💾 Section 6 : Export
+### 💾 Section 7 : Export
 
 - **Télécharger données filtrées** : CSV avec les années sélectionnées
 - **Télécharger statistiques** : Résumé des métriques par année
@@ -88,7 +140,7 @@ Le dashboard s'ouvre automatiquement dans votre navigateur sur http://localhost:
 ### 📂 Fichier de prédictions
 Le dashboard détecte automatiquement vos fichiers dans `data/predictions/`
 
-**Note** : Le fichier s'appelle `predictions_longterm_2ans.csv` à cause d'un bug de calcul corrigé. 
+**Note** : Le fichier s'appelle `predictions_longterm_2ans.csv` à cause d'un bug de calcul corrigé.
 Le fichier contient bien **3 ans** de prédictions (26,280 heures = 1,095 jours).
 
 ### 📚 Données Historiques
@@ -96,6 +148,17 @@ Le fichier contient bien **3 ans** de prédictions (26,280 heures = 1,095 jours)
 - Par défaut : `dataFE_prm_30000250086126.csv`
 - Le dashboard fusionne automatiquement historique + prédictions
 - Distinction visuelle : 🟢 Historique | 🟠 Prédictions
+
+### 💰 Module Budgétaire
+- ✅ **Cochez "Activer module budgétaire"** pour afficher l'analyse des coûts
+- **Charger fichier prix spot** : CSV avec colonnes `datetime` et `prix_spot_eur_mwh`
+- **Paramètres de couverture** :
+  - Volumes Base/Peak (kW)
+  - Prix Base/Peak (€/MWh)
+  - TURPE (€/kWh) : Tarif d'acheminement
+  - Taxes (%) : TVA et autres taxes
+
+💡 **Info heures Peak** : Lundi-Vendredi 8h-20h (autres heures = Base)
 
 ### 🔍 Filtres
 - **Années à afficher** : Sélectionnez les années à analyser
@@ -116,34 +179,51 @@ Le fichier contient bien **3 ans** de prédictions (26,280 heures = 1,095 jours)
 - MAE < 40 kW = Excellent
 - Lisez les explications détaillées
 
-### 2. Comparer historique et prédictions
+### 2. Analyser les coûts budgétaires
+**Question** : "Combien va me coûter l'électricité avec ma stratégie de couverture ?"
+
+👉 Activez le **Module Budgétaire** (Section 2)
+1. Chargez un fichier de prix spot
+2. Configurez vos volumes/prix contractuels Base/Peak
+3. Définissez TURPE et taxes
+4. Consultez les 5 KPIs globaux
+5. Explorez les 3 onglets (Volumes, Coûts, Prix)
+6. Exportez le rapport mensuel
+
+**Exemple d'analyse** :
+- Taux de couverture = 85% → 15% de la consommation est achetée au spot
+- Si exposition spot > 20% → envisager d'augmenter les volumes contractuels
+- Si crédit vente important → volume contractuel trop élevé
+
+### 3. Comparer historique et prédictions
 **Question** : "Les prédictions sont-elles cohérentes avec le passé ?"
 
-👉 Regardez la **Section 2** (Comparaison)
+👉 Regardez la **Section 3** (Comparaison)
 - **Onglet Évolution Annuelle** : Les courbes se prolongent-elles logiquement ?
 - **Onglet Mensuelle** : Les patterns saisonniers sont-ils respectés ?
 - **Onglet Horaire** : Les pics journaliers sont-ils similaires ?
 
-### 3. Identifier les tendances
+### 4. Identifier les tendances
 **Question** : "Ma consommation va-t-elle augmenter ou diminuer ?"
 
-👉 Regardez la **Section 4** (Comparaison par Année)
+👉 Regardez la **Section 5** (Comparaison par Année)
 - Tableau "Croissance annuelle" : % d'évolution
 - Graphique barres : Visualisation immédiate
 
-### 4. Analyser les pics
+### 5. Analyser les pics
 **Question** : "Quand sont mes pics de consommation ?"
 
-👉 Regardez la **Section 5** (Analyses Avancées)
+👉 Regardez la **Section 6** (Analyses Avancées)
 - **Heatmap Mois × Heure** : Zones rouges = pics
 - **Patterns Hebdomadaires** : Différences semaine/weekend
 
-### 5. Planifier le budget
+### 6. Planifier le budget
 **Question** : "Combien d'énergie vais-je consommer l'an prochain ?"
 
 👉 Regardez :
 - **Section 1 - Métriques Clés** : Énergie totale (MWh)
-- **Section 4 - Statistiques détaillées** : Énergie par année
+- **Section 5 - Statistiques détaillées** : Énergie par année
+- **Section 2 - Module Budgétaire** : Coûts détaillés avec stratégie contractuelle
 - Exportez les données pour vos calculs Excel
 
 ## 💡 Conseils d'Interprétation
@@ -214,7 +294,7 @@ Modifiez dans le code les valeurs `color = '#2ca02c'` etc.
 **Problèmes fréquents** :
 
 1. **"Aucun fichier de prédictions trouvé"**
-   - Lancez d'abord : `python main.py predict-longterm --historique dataFE_prm_30000250086126.csv --years 3`
+   - Lancez d'abord : `python main.py predict-longterm --prm XXXXX --years 3`
 
 2. **"Fichier historique introuvable"**
    - Vérifiez le chemin dans la sidebar

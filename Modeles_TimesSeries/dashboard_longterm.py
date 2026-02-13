@@ -10,6 +10,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import json
 import sys
+from dashboard_budget_extension import section_budget_simulator
+from budget_helper import charger_prix_spot
 
 # Ajouter src au path
 sys.path.insert(0, str(Path(__file__).parent / 'src'))
@@ -55,41 +57,110 @@ def load_sites_info():
     sites_df = loader.load_sites_table()
     return sites_df
 
-# Titre principal avec sélection de site
+# Charger tous les sites et leurs données
+@st.cache_data
+def load_all_sites_data():
+    """Charge les prédictions et historiques de tous les sites disponibles"""
+    predictions_dir = Path("data/predictions")
+    processed_dir = Path("data/processed")
+
+    if not predictions_dir.exists():
+        return None, None
+
+    csv_files = list(predictions_dir.glob("predictions_longterm_*.csv"))
+    if not csv_files:
+        return None, None
+
+    all_predictions = []
+    all_historiques = []
+    site_info_list = []
+
+    import re
+    for pred_file in csv_files:
+        # Extraire le PRM
+        prm_match = re.search(r'_(\d{14})\.csv$', pred_file.name)
+        if not prm_match:
+            continue
+        prm = prm_match.group(1)
+
+        # Charger prédictions
+        try:
+            df_pred = pd.read_csv(pred_file)
+            df_pred['datetime'] = pd.to_datetime(df_pred['datetime'])
+            df_pred['prm'] = prm
+            df_pred['type_donnee'] = 'Prédiction'
+            all_predictions.append(df_pred)
+        except:
+            continue
+
+        # Charger historique correspondant
+        hist_file = processed_dir / f"data_preprocessed_{prm}.csv"
+        if hist_file.exists():
+            try:
+                df_hist = pd.read_csv(hist_file)
+                df_hist['datetime'] = pd.to_datetime(df_hist['datetime'])
+                df_hist['prm'] = prm
+                df_hist['type_donnee'] = 'Historique'
+                all_historiques.append(df_hist)
+            except:
+                pass
+
+        site_info_list.append(prm)
+
+    df_all_pred = pd.concat(all_predictions, ignore_index=True) if all_predictions else None
+    df_all_hist = pd.concat(all_historiques, ignore_index=True) if all_historiques else None
+
+    return df_all_pred, df_all_hist
+
+# Charger toutes les données
+df_all_predictions, df_all_historique = load_all_sites_data()
+
+if df_all_predictions is None:
+    st.error("Aucun fichier de prédictions trouvé dans data/predictions/")
+    st.info("Générez d'abord les prédictions :")
+    st.code("python main.py predict-longterm --prm 30000540191777 --years 3")
+    st.info("Ou pour tous les sites :")
+    st.code("python generate_all_predictions.py")
+    st.stop()
+
+# Récupérer la liste des sites
+available_prms = sorted(df_all_predictions['prm'].unique().tolist())
 sites_df = load_sites_info()
-available_prms = sites_df['prm'].astype(str).tolist() if not sites_df.empty else []
+
+# Créer mapping PRM -> Ville
+prm_to_city = {}
+if not sites_df.empty:
+    for _, row in sites_df.iterrows():
+        prm_to_city[str(row['prm'])] = row['ville']
 
 # Sidebar pour sélectionner le site
 st.sidebar.header("⚙️ Configuration")
-if available_prms:
-    # Créer un dictionnaire prm -> ville pour l'affichage
-    prm_to_city = {str(row['prm']): row['ville'] for _, row in sites_df.iterrows()}
+st.sidebar.markdown("### 🏢 Sélection du périmètre")
 
-    # Sélection du site avec affichage de la ville
-    selected_display = st.sidebar.selectbox(
-        "Sélectionner un site",
-        options=[f"{prm_to_city[prm]} (PRM: {prm})" for prm in available_prms],
-        index=0
-    )
+# Option "Tous les sites" + sites individuels
+site_options = ["🏢 Tous les sites (Vue Entreprise)"]
+for prm in available_prms:
+    ville = prm_to_city.get(prm, f"Site {prm}")
+    site_options.append(f"{ville} (PRM: {prm})")
 
-    # Extraire le PRM sélectionné
-    selected_prm = selected_display.split("PRM: ")[1].rstrip(")")
+selected_display = st.sidebar.selectbox(
+    "Périmètre d'analyse",
+    options=site_options,
+    index=0
+)
 
-    # Récupérer les infos du site
-    site_info = sites_df[sites_df['prm'] == int(selected_prm)].iloc[0]
-
-    # Afficher le titre avec la ville
-    st.title(f"📊 Dashboard - {site_info['ville']}")
-    st.markdown(f"**Code postal:** {site_info['code_postal']} | **PRM:** {selected_prm}")
-else:
-    st.title("📊 Dashboard de Prédictions Énergétiques")
+# Déterminer le mode (tous sites ou site spécifique)
+if selected_display.startswith("🏢 Tous les sites"):
     selected_prm = None
-    st.warning("⚠️ Aucun site trouvé dans la table des sites")
+    st.title("🏢 Dashboard Entreprise - Vue Consolidée")
+    st.markdown("**Analyse des consommations de tous les sites**")
+else:
+    selected_prm = selected_display.split("PRM: ")[1].rstrip(")")
+    ville = prm_to_city.get(selected_prm, f"Site {selected_prm}")
+    st.title(f"📊 Dashboard - {ville}")
+    st.markdown(f"**PRM:** {selected_prm}")
 
-st.markdown("Visualisation des prédictions de consommation énergétique")
-
-# Sidebar
-st.sidebar.markdown("---")
+st.markdown("---")
 
 # Fonction de chargement des données
 @st.cache_data
@@ -151,10 +222,20 @@ def load_historique(filepath):
         return None
 
 @st.cache_data
-def load_model_metrics():
+def load_model_metrics(prm=None):
     """Charge les métriques du modèle depuis le fichier config sauvegardé"""
     try:
-        config_path = Path("models/saved/config_latest.json")
+        if prm:
+            # Charger les métriques pour un site spécifique
+            config_path = Path(f"models/saved/config_latest_lstm_energy_forecast_{prm}.json")
+        else:
+            # Mode consolidé : charger les métriques du premier site disponible
+            config_files = list(Path("models/saved").glob("config_latest_lstm_energy_forecast_*.json"))
+            if config_files:
+                config_path = config_files[0]
+            else:
+                return None
+
         if config_path.exists():
             with open(config_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
@@ -163,48 +244,123 @@ def load_model_metrics():
         print(f"Erreur lors du chargement des métriques : {e}")
         return None
 
-# Sélection du fichier
-predictions_dir = Path("data/predictions")
-if predictions_dir.exists():
-    csv_files = list(predictions_dir.glob("predictions_longterm_*.csv"))
-    if csv_files:
-        selected_file = st.sidebar.selectbox(
-            "📂 Fichier de prédictions",
-            csv_files,
-            format_func=lambda x: x.name
-        )
-    else:
-        st.error("Aucun fichier de prédictions trouvé dans data/predictions/")
-        st.info("Lancez d'abord : `python main.py predict-longterm --historique dataFE_prm_30000250086126.csv --years 3`")
-        st.stop()
+# Fonction de chargement des prix
+@st.cache_data
+def load_prix_spot(filepath):
+    """Charge les prix spot depuis un fichier CSV"""
+    try:
+        df_prix = charger_prix_spot(filepath)
+        return df_prix
+    except FileNotFoundError:
+        return None
+    except Exception as e:
+        st.error(f"Erreur lors du chargement des prix : {e}")
+        return None
+
+
+# Filtrer les données selon le périmètre sélectionné
+if selected_prm:
+    # Site spécifique
+    df_predictions = df_all_predictions[df_all_predictions['prm'] == selected_prm].copy()
+    historique = df_all_historique[df_all_historique['prm'] == selected_prm].copy() if df_all_historique is not None else None
 else:
-    st.error("Le dossier data/predictions/ n'existe pas")
-    st.stop()
+    # Tous les sites - Agréger les consommations
+    # Identifier la colonne de consommation (puissance_kw_pred pour prédictions, puissance_moy_heure pour historique)
+    df_predictions = df_all_predictions.groupby('datetime').agg({
+        'puissance_kw_pred': 'sum'
+    }).reset_index()
+    df_predictions['type_donnee'] = 'Prédiction'
 
-# Option pour charger l'historique
-st.sidebar.markdown("---")
-st.sidebar.markdown("### Données Historiques")
-load_hist = st.sidebar.checkbox("Charger les données historiques", value=True)
-
-historique = None
-if load_hist:
-    hist_file = st.sidebar.text_input(
-        "Fichier historique",
-        value="dataFE_prm_30000250086126.csv"
-    )
-    if Path(hist_file).exists():
-        historique = load_historique(hist_file)
-        if historique is not None:
-            st.sidebar.success(f"✅{len(historique):,} lignes historiques chargées")
+    if df_all_historique is not None:
+        historique = df_all_historique.groupby('datetime').agg({
+            'puissance_moy_heure': 'sum'
+        }).reset_index()
+        # Renommer pour uniformiser
+        historique.rename(columns={'puissance_moy_heure': 'puissance_kw_pred'}, inplace=True)
+        historique['type_donnee'] = 'Historique'
     else:
-        st.sidebar.error(f"Fichier introuvable : {hist_file}")
+        historique = None
 
-# Charger les données
-df_predictions = load_predictions(selected_file)
+# Uniformiser les noms de colonnes
+if 'puissance_moy_heure' in df_predictions.columns and 'puissance_kw_pred' not in df_predictions.columns:
+    df_predictions.rename(columns={'puissance_moy_heure': 'puissance_kw_pred'}, inplace=True)
+
+if historique is not None:
+    if 'puissance_moy_heure' in historique.columns and 'puissance_kw_pred' not in historique.columns:
+        historique.rename(columns={'puissance_moy_heure': 'puissance_kw_pred'}, inplace=True)
+
+# Créer une colonne unifiée 'conso_reelle_kw' pour la compatibilité
+df_predictions['conso_reelle_kw'] = df_predictions['puissance_kw_pred']
+if historique is not None:
+    historique['conso_reelle_kw'] = historique['puissance_kw_pred']
+
+# Ajouter les colonnes temporelles
+for df in [df_predictions, historique]:
+    if df is not None and len(df) > 0:
+        if 'annee' not in df.columns:
+            df['annee'] = df['datetime'].dt.year
+        if 'mois' not in df.columns:
+            df['mois'] = df['datetime'].dt.month
+        if 'jour_semaine' not in df.columns:
+            df['jour_semaine'] = df['datetime'].dt.dayofweek
+        if 'heure' not in df.columns:
+            df['heure'] = df['datetime'].dt.hour
 
 if df_predictions is None or len(df_predictions) == 0:
     st.error("Impossible de charger les données ou fichier vide")
     st.stop()
+
+# Afficher infos de chargement dans sidebar
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 📊 Données chargées")
+if selected_prm:
+    st.sidebar.info(f"📈 **{len(df_predictions):,}** points de prédiction")
+    if historique is not None:
+        st.sidebar.info(f"📚 **{len(historique):,}** points historiques")
+else:
+    nb_sites = len(available_prms)
+    st.sidebar.success(f"🏢 **{nb_sites}** sites consolidés")
+    st.sidebar.info(f"📈 **{len(df_predictions):,}** points de prédiction")
+    if historique is not None:
+        st.sidebar.info(f"📚 **{len(historique):,}** points historiques")
+
+
+# Interface dans la sidebar - Module Budgétaire toujours actif
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 💰 Module Budgétaire")
+
+# Charger automatiquement les prix spot
+prix_file = "data/raw/prix/prix_spot.csv"
+prix_spot = None
+
+if Path(prix_file).exists():
+    prix_spot = load_prix_spot(prix_file)
+    if prix_spot is not None and isinstance(prix_spot, pd.DataFrame):
+        st.sidebar.success(f"✅ {len(prix_spot)} périodes de prix chargées")
+    else:
+        st.sidebar.error(f"⚠️ Erreur: prix_spot n'est pas un DataFrame (type={type(prix_spot)})")
+        prix_spot = None
+else:
+    st.sidebar.warning(f"⚠️ Fichier prix spot introuvable : {prix_file}")
+    st.sidebar.info("Le module budgétaire sera désactivé sans fichier de prix")
+
+# Configuration volumes et prix (toujours affichés)
+st.sidebar.markdown("#### 📦 Volumes achetés")
+col1, col2 = st.sidebar.columns(2)
+with col1:
+    st.markdown("**Base**")
+    volume_base = st.number_input("kW", value=250.0, step=10.0, key="vb")
+    prix_base = st.number_input("€/MWh", value=42.0, step=1.0, key="pb")
+
+with col2:
+    st.markdown("**Peak**")
+    volume_peak = st.number_input("kW", value=100.0, step=10.0, key="vp")
+    prix_peak = st.number_input("€/MWh", value=55.0, step=1.0, key="pp")
+
+st.sidebar.info("Peak = 8h-20h semaine")
+
+turpe = st.sidebar.number_input("TURPE (€/kWh)", value=0.05, step=0.001, format="%.3f")
+taxes = st.sidebar.number_input("Taxes (%)", value=20.0, step=1.0)
 
 # Fusionner historique et prédictions si disponible
 if historique is not None:
@@ -217,8 +373,8 @@ if historique is not None:
 else:
     df_all = df_predictions.copy()
 
-# Charger les métriques du modèle
-model_metrics = load_model_metrics()
+# Charger les métriques du modèle (avec PRM si site spécifique)
+model_metrics = load_model_metrics(prm=selected_prm)
 
 # Informations générales
 st.sidebar.markdown("---")
@@ -826,6 +982,331 @@ with tab_horaire:
     st.info("💡 Le profil horaire montre si le modèle capte bien les variations journalières typiques (pics le matin/soir).")
 
 st.markdown("---")
+
+# ============================================================================
+# PARTIE 3.5 : MODULE BUDGÉTAIRE (PILOTAGE)
+# ============================================================================
+if prix_spot is not None and not prix_spot.empty:
+    st.header("💰 Pilotage Budgétaire")
+
+    st.markdown("""
+    Cette section vous permet d'analyser les coûts d'achat d'électricité en fonction de votre couverture contractuelle.
+    """)
+
+    # Import du calculateur
+    from budget_helper import BudgetCalculator
+
+    # Créer le calculateur
+    calculator = BudgetCalculator(prix_spot)
+    df_enrichi = calculator.enrichir_predictions(df_predictions)
+
+    # Définir Peak/Base
+    df_enrichi['heure'] = df_enrichi['datetime'].dt.hour
+    df_enrichi['jour_semaine'] = df_enrichi['datetime'].dt.dayofweek
+    df_enrichi['is_peak'] = (
+        (df_enrichi['heure'] >= 8) &
+        (df_enrichi['heure'] < 20) &
+        (df_enrichi['jour_semaine'] < 5)
+    )
+
+    df_enrichi['volume_achete_kw'] = np.where(
+        df_enrichi['is_peak'],
+        volume_base + volume_peak,
+        volume_base
+    )
+
+    df_enrichi['prix_achete_eur_mwh'] = np.where(
+        df_enrichi['is_peak'],
+        (volume_base * prix_base + volume_peak * prix_peak) / (volume_base + volume_peak),
+        prix_base
+    )
+
+    # Calculer les coûts
+    df_calc = calculator.calculer_cout_avec_parametres(
+        df_enrichi,
+        tarif_acheminement_eur_kwh=turpe,
+        taux_taxe_pct=taxes,
+        volumes_achetes_kw=df_enrichi['volume_achete_kw'],
+        prix_achetes_eur_mwh=df_enrichi['prix_achete_eur_mwh']
+    )
+
+    # Préparer données
+    df_calc['mois'] = df_calc['datetime'].dt.to_period('M').astype(str)
+    df_calc['vol_base_mwh'] = volume_base / 1000
+    df_calc['vol_peak_mwh'] = np.where(df_calc['is_peak'], volume_peak / 1000, 0)
+    df_calc['cout_base_eur'] = volume_base * prix_base / 1000
+    df_calc['cout_peak_eur'] = np.where(df_calc['is_peak'], volume_peak * prix_peak / 1000, 0)
+    df_calc['vol_achat_spot_mwh'] = np.where(df_calc['ecart_kw'] > 0, df_calc['ecart_kw'] / 1000, 0)
+    df_calc['vol_vente_spot_mwh'] = np.where(df_calc['ecart_kw'] < 0, -df_calc['ecart_kw'] / 1000, 0)
+    df_calc['cout_achat_spot'] = np.where(df_calc['ecart_kw'] > 0, df_calc['cout_ecart_spot_eur'], 0)
+    df_calc['credit_vente_spot'] = np.where(df_calc['ecart_kw'] < 0, -df_calc['cout_ecart_spot_eur'], 0)
+
+    # Agrégation mensuelle
+    rapport = df_calc.groupby('mois').agg({
+        'conso_reelle_kw': lambda x: x.sum() / 1000,
+        'cout_total_eur': 'sum',
+        'vol_base_mwh': 'sum',
+        'vol_peak_mwh': 'sum',
+        'cout_base_eur': 'sum',
+        'cout_peak_eur': 'sum',
+        'vol_achat_spot_mwh': 'sum',
+        'vol_vente_spot_mwh': 'sum',
+        'cout_achat_spot': 'sum',
+        'credit_vente_spot': 'sum',
+        'prix_spot_eur_mwh': 'mean'
+    }).reset_index()
+
+    rapport['prix_moyen'] = rapport['cout_total_eur'] / rapport['conso_reelle_kw']
+    rapport['vol_couverture'] = rapport['vol_base_mwh'] + rapport['vol_peak_mwh']
+    rapport['cout_couverture'] = rapport['cout_base_eur'] + rapport['cout_peak_eur']
+    rapport['taux_couverture'] = rapport['vol_couverture'] / rapport['conso_reelle_kw'] * 100
+
+    # KPIs GLOBAUX
+    st.subheader("📊 Vue d'ensemble budgétaire")
+
+    col1, col2, col3, col4, col5 = st.columns(5)
+
+    total_volume = rapport['conso_reelle_kw'].sum()
+    total_cout = rapport['cout_total_eur'].sum()
+    prix_moyen_global = total_cout / total_volume if total_volume > 0 else 0
+    taux_cov_moyen = rapport['taux_couverture'].mean()
+    total_achat_spot = rapport['vol_achat_spot_mwh'].sum()
+
+    with col1:
+        st.metric("Volume total", f"{total_volume:,.0f} MWh")
+
+    with col2:
+        st.metric("Coût total", f"{total_cout:,.0f} €")
+
+    with col3:
+        st.metric("Prix moyen", f"{prix_moyen_global:.2f} €/MWh")
+
+    with col4:
+        st.metric("Taux couverture", f"{taux_cov_moyen:.1f}%")
+
+    with col5:
+        exposition_spot = (total_achat_spot / total_volume * 100) if total_volume > 0 else 0
+        st.metric("Exposition spot", f"{exposition_spot:.1f}%")
+
+    # Onglets budgétaires
+    tab_vol, tab_cout, tab_prix = st.tabs(["📦 Volumes", "💰 Coûts", "📈 Prix"])
+
+    with tab_vol:
+        st.subheader("Répartition des volumes")
+
+        col1, col2 = st.columns([2, 1])
+
+        with col1:
+            # Graphique empilé volumes mensuels
+            fig_vol = go.Figure()
+
+            fig_vol.add_trace(go.Bar(
+                name='Base',
+                x=rapport['mois'],
+                y=rapport['vol_base_mwh'],
+                marker_color='#2E86AB'
+            ))
+
+            fig_vol.add_trace(go.Bar(
+                name='Peak',
+                x=rapport['mois'],
+                y=rapport['vol_peak_mwh'],
+                marker_color='#A23B72'
+            ))
+
+            fig_vol.add_trace(go.Bar(
+                name='Achat Spot',
+                x=rapport['mois'],
+                y=rapport['vol_achat_spot_mwh'],
+                marker_color='#F18F01'
+            ))
+
+            fig_vol.add_trace(go.Bar(
+                name='Vente Spot',
+                x=rapport['mois'],
+                y=-rapport['vol_vente_spot_mwh'],
+                marker_color='#C73E1D'
+            ))
+
+            fig_vol.update_layout(
+                barmode='relative',
+                title='Volumes mensuels par type',
+                xaxis_title='Mois',
+                yaxis_title='Volume (MWh)',
+                height=400,
+                hovermode='x unified'
+            )
+
+            st.plotly_chart(fig_vol, use_container_width=True)
+
+        with col2:
+            # Répartition globale
+            total_base = rapport['vol_base_mwh'].sum()
+            total_peak = rapport['vol_peak_mwh'].sum()
+            total_achat = rapport['vol_achat_spot_mwh'].sum()
+            total_vente = rapport['vol_vente_spot_mwh'].sum()
+
+            fig_pie = go.Figure(data=[go.Pie(
+                labels=['Base', 'Peak', 'Achat Spot', 'Vente Spot'],
+                values=[total_base, total_peak, total_achat, total_vente],
+                hole=0.4,
+                marker=dict(colors=['#2E86AB', '#A23B72', '#F18F01', '#C73E1D'])
+            )])
+
+            fig_pie.update_layout(
+                title='Répartition globale',
+                height=400
+            )
+
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+    with tab_cout:
+        st.subheader("Répartition des coûts")
+
+        # Graphique empilé coûts mensuels
+        fig_cout = go.Figure()
+
+        fig_cout.add_trace(go.Bar(
+            name='Couverture (Base+Peak)',
+            x=rapport['mois'],
+            y=rapport['cout_couverture'],
+            marker_color='#2E86AB'
+        ))
+
+        fig_cout.add_trace(go.Bar(
+            name='Achat Spot',
+            x=rapport['mois'],
+            y=rapport['cout_achat_spot'],
+            marker_color='#F18F01'
+        ))
+
+        fig_cout.add_trace(go.Bar(
+            name='Crédit Vente Spot',
+            x=rapport['mois'],
+            y=-rapport['credit_vente_spot'],
+            marker_color='#27AE60'
+        ))
+
+        fig_cout.update_layout(
+            barmode='relative',
+            title='Coûts mensuels par composante',
+            xaxis_title='Mois',
+            yaxis_title='Coût (€)',
+            height=400,
+            hovermode='x unified'
+        )
+
+        st.plotly_chart(fig_cout, use_container_width=True)
+
+        # KPIs coûts
+        col1, col2, col3 = st.columns(3)
+
+        total_cout_couv = rapport['cout_couverture'].sum()
+        total_cout_achat = rapport['cout_achat_spot'].sum()
+        total_credit_vente = rapport['credit_vente_spot'].sum()
+
+        with col1:
+            pct_couv = (total_cout_couv/total_cout*100) if total_cout > 0 else 0
+            st.metric("Couverture", f"{total_cout_couv:,.0f} €",
+                      delta=f"{pct_couv:.1f}%")
+
+        with col2:
+            pct_achat = (total_cout_achat/total_cout*100) if total_cout > 0 else 0
+            st.metric("Achat Spot", f"{total_cout_achat:,.0f} €",
+                      delta=f"{pct_achat:.1f}%")
+
+        with col3:
+            pct_vente = (total_credit_vente/total_cout*100) if total_cout > 0 else 0
+            st.metric("Crédit Vente", f"{total_credit_vente:,.0f} €",
+                      delta=f"-{pct_vente:.1f}%",
+                      delta_color="normal")
+
+    with tab_prix:
+        st.subheader("Analyse des prix")
+
+        # Prix moyens mensuels
+        fig_prix = go.Figure()
+
+        fig_prix.add_trace(go.Scatter(
+            x=rapport['mois'],
+            y=rapport['prix_moyen'],
+            name='Prix moyen global',
+            line=dict(color='#2E86AB', width=3),
+            mode='lines+markers'
+        ))
+
+        fig_prix.add_trace(go.Scatter(
+            x=rapport['mois'],
+            y=[prix_base] * len(rapport),
+            name='Prix Base (contractuel)',
+            line=dict(color='#27AE60', width=2, dash='dash')
+        ))
+
+        fig_prix.add_trace(go.Scatter(
+            x=rapport['mois'],
+            y=[prix_peak] * len(rapport),
+            name='Prix Peak (contractuel)',
+            line=dict(color='#A23B72', width=2, dash='dash')
+        ))
+
+        fig_prix.add_trace(go.Scatter(
+            x=rapport['mois'],
+            y=rapport['prix_spot_eur_mwh'],
+            name='Prix spot moyen',
+            line=dict(color='#F18F01', width=2),
+            mode='lines+markers'
+        ))
+
+        fig_prix.update_layout(
+            title='Évolution des prix moyens',
+            xaxis_title='Mois',
+            yaxis_title='Prix (€/MWh)',
+            height=400,
+            hovermode='x unified'
+        )
+
+        st.plotly_chart(fig_prix, use_container_width=True)
+
+        # Taux de couverture
+        fig_taux = go.Figure()
+
+        fig_taux.add_trace(go.Scatter(
+            x=rapport['mois'],
+            y=rapport['taux_couverture'],
+            fill='tozeroy',
+            fillcolor='rgba(46, 134, 171, 0.3)',
+            line=dict(color='#2E86AB', width=3),
+            mode='lines+markers'
+        ))
+
+        fig_taux.add_hline(
+            y=100,
+            line_dash="dash",
+            line_color="gray",
+            annotation_text="Couverture 100%"
+        )
+
+        fig_taux.update_layout(
+            title='Taux de couverture mensuel',
+            xaxis_title='Mois',
+            yaxis_title='Taux de couverture (%)',
+            height=400
+        )
+
+        st.plotly_chart(fig_taux, use_container_width=True)
+
+    # Export rapport
+    st.subheader("📥 Export rapport budgétaire")
+
+    csv_rapport = rapport.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="Télécharger le rapport mensuel (CSV)",
+        data=csv_rapport,
+        file_name=f"rapport_budgetaire_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        mime="text/csv"
+    )
+
+    st.markdown("---")
 
 # ============================================================================
 # PARTIE 4 : INFORMATIONS SUR LE MODÈLE

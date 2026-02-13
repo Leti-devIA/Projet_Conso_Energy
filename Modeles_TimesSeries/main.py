@@ -28,6 +28,7 @@ from predict import predict_future, save_predictions
 from predict_longterm import predict_longterm, save_longterm_predictions
 from data_loader import get_data_loader
 import pandas as pd
+from generate_climate_averages import generate_climate_averages_pipeline
 
 
 def list_sites(config_path='config/config.yaml'):
@@ -60,80 +61,113 @@ def list_sites(config_path='config/config.yaml'):
 
 def main_train(args):
     """
-    Pipeline complet d'entraînement.
-
-    Args:
-        args: Arguments de la ligne de commande
+    Entraîne un ou plusieurs modèles LSTM.
     """
-    print("\n" + "🚀" * 30)
+    print("\n" + "🚀" * 40)
     print("PIPELINE D'ENTRAÎNEMENT")
-    print("🚀" * 30 + "\n")
+    print("🚀" * 40 + "\n")
 
-    # Créer le data loader
+    # Charger le DataLoader
     loader = get_data_loader('csv', args.config)
 
-    # Déterminer les PRMs à traiter
+    # Déterminer les sites à traiter
     if args.all_sites:
-        prms = loader.list_available_sites()
-        if not prms:
-            print("❌ Aucun site trouvé!")
-            sys.exit(1)
+        sites_df = loader.load_sites_table()
+        prms = sites_df['prm'].astype(str).tolist()  # Convertir en string
         print(f"📊 Entraînement sur {len(prms)} sites : {', '.join(prms)}\n")
-    elif args.prm:
-        prms = [args.prm]
-        print(f"📊 Entraînement sur le site : {args.prm}\n")
     else:
-        print("❌ Vous devez spécifier --prm ou --all-sites")
-        sys.exit(1)
+        prms = [str(args.prm)]  # Convertir en string
 
     # Traiter chaque site
     for prm in prms:
-        print("\n" + "=" * 60)
-        print(f"TRAITEMENT DU SITE : {prm}")
-        print("=" * 60 + "\n")
+        try:
+            print("\n" + "=" * 60)
+            print(f"TRAITEMENT DU SITE : {prm}")
+            print("=" * 60)
 
-        # 1. Charger les données
-        print("📂 Chargement des données...")
-        df = loader.load_site_data(prm=prm)
+            # 1. Charger les données du site
+            print("\n📂 Chargement des données...")
+            df_conso = loader.load_site_data(prm=prm)
 
-        # 2. Preprocessing
-        if args.skip_preprocessing:
-            print("⏭️ Preprocessing ignoré")
-        else:
+            # 2. Charger les données météo correspondantes
+            print(f"📂 Chargement de la météo pour le site {prm}...")
+            try:
+                df_meteo = loader.load_meteo_data(prm=prm)
+
+                # Fusionner consommation et météo
+                print("🔗 Fusion des données de consommation et météo...")
+                df_meteo['datetime'] = pd.to_datetime(df_meteo['datetime'])
+                df_conso['datetime'] = pd.to_datetime(df_conso['datetime'])
+
+                df = df_conso.merge(df_meteo, on='datetime', how='left', suffixes=('', '_meteo'))
+
+                print(f"   ✅ {len(df)} lignes après fusion")
+                print(f"   📋 Colonnes après fusion : {list(df.columns)[:10]}...")  # Afficher premières colonnes
+
+            except FileNotFoundError as e:
+                print(f"⚠️  Pas de données météo trouvées pour {prm}")
+                print(f"   Génération automatique de la météo...")
+
+                # Générer la météo pour ce site
+                df_meteo = generate_climate_averages_pipeline(
+                    historique_path=f"data/raw/sites/dataclean_prm_{prm}.csv",
+                    output_path=f"data/raw/meteo/meteo_moyennes_3ans_{prm}.csv",
+                    start_date=None,
+                    nb_annees=3,
+                    add_variability=True,
+                    config_path=args.config
+                )
+
+                # Réessayer la fusion
+                df_meteo['datetime'] = pd.to_datetime(df_meteo['datetime'])
+                df = df_conso.merge(df_meteo, on='datetime', how='left', suffixes=('', '_meteo'))
+
+            # 3. Preprocessing
             print("\n🔧 ÉTAPE 1/3 : Preprocessing")
-            output_preprocessed = f"data/processed/data_preprocessed_{prm}.csv"
-            df = preprocess_pipeline(df, output_preprocessed, args.config, from_dataframe=True)
+            df_preprocessed = preprocess_pipeline(
+                df,
+                output_filepath=f"data/processed/data_preprocessed_{prm}.csv",
+                config_path=args.config
+            )
 
-        # 3. Feature Engineering
-        if args.skip_features:
-            print("⏭️ Feature engineering ignoré")
-            df_fe = df
-        else:
+            # 4. Feature Engineering
             print("\n🔧 ÉTAPE 2/3 : Feature Engineering")
-            df_fe = feature_engineering_pipeline(df, args.config)
-            output_features = f"data/processed/data_with_features_{prm}.csv"
-            df_fe.to_csv(output_features, index=False)
-            print(f"✅ Données avec features sauvegardées : {output_features}")
+            df_features = feature_engineering_pipeline(
+                df_preprocessed,
+                config_path=args.config
+            )
 
-        # 4. Entraînement
-        print("\n🔧 ÉTAPE 3/3 : Entraînement")
-        data_path = f"data/processed/data_with_features_{prm}.csv"
-        model, history, metrics = train_model(
-            data_path,
-            args.config,
-            use_tensorboard=not args.no_tensorboard,
-            model_suffix=prm
-        )
+            # Sauvegarder
+            output_path = f"data/processed/data_with_features_{prm}.csv"
+            df_features.to_csv(output_path, index=False)
+            print(f"✅ Données avec features sauvegardées : {output_path}")
 
-        print("\n" + "🎉" * 30)
-        print(f"ENTRAÎNEMENT TERMINÉ POUR LE SITE {prm}")
-        print("🎉" * 30)
-        print(f"\n📊 Résultats finaux :")
-        print(f"   MAE  : {metrics['mae']:.2f} kW")
-        print(f"   RMSE : {metrics['rmse']:.2f} kW")
-        print(f"   R²   : {metrics['r2']:.4f}")
-        print(f"   MAPE : {metrics['mape']:.2f}%")
+            # 5. Entraînement
+            print("\n🔧 ÉTAPE 3/3 : Entraînement")
+            model, history, metrics = train_model(
+                data_path=output_path,
+                config_path=args.config,
+                model_suffix=f"lstm_energy_forecast_{prm}"
+            )
 
+            # Afficher les résultats
+            print("\n" + "=" * 60)
+            print(f"✅ MODÈLE ENTRAÎNÉ POUR LE SITE {prm}")
+            print("=" * 60)
+            print(f"📊 Métriques finales :")
+            print(f"   Test RMSE  : {metrics['test_rmse']:.2f} kW")
+            print(f"   Test MAE   : {metrics['test_mae']:.2f} kW")
+            print(f"   Test R²    : {metrics['test_r2']:.4f}")
+
+        except Exception as e:
+            print(f"\n❌ ERREUR pour le site {prm} : {e}")
+            import traceback
+            traceback.print_exc()
+            continue
+
+    print("\n" + "🎉" * 40)
+    print("ENTRAÎNEMENT TERMINÉ POUR TOUS LES SITES")
+    print("🎉" * 40)
 
 
 def main_predict(args):
@@ -187,18 +221,43 @@ def main_predict_longterm(args):
     print("⚠️  ATTENTION : Utilise des moyennes climatiques (moins précis)")
     print()
 
+    # Construire les chemins automatiquement
+    prm = args.prm
+    historique_path = f"data/processed/data_preprocessed_{prm}.csv"
+    model_suffix = f"lstm_energy_forecast_{prm}"
+
+    # Vérifier que le fichier historique existe
+    if not Path(historique_path).exists():
+        print(f"❌ Erreur : Fichier historique introuvable : {historique_path}")
+        print(f"\nAssurez-vous d'avoir entraîné le modèle pour le PRM {prm} :")
+        print(f"   python main.py train --prm {prm}")
+        sys.exit(1)
+
+    # Vérifier que le modèle existe
+    model_path = Path(args.model_dir) / f"lstm_energy_forecast_latest_{model_suffix}.h5"
+    if not model_path.exists():
+        print(f"❌ Erreur : Modèle introuvable : {model_path}")
+        print(f"\nAssurez-vous d'avoir entraîné le modèle pour le PRM {prm} :")
+        print(f"   python main.py train --prm {prm}")
+        sys.exit(1)
+
+    print(f"📂 Historique : {historique_path}")
+    print(f"🤖 Modèle : {model_path}")
+    print()
+
     # Prédire
     predictions = predict_longterm(
-        historique_path=args.historique,
+        historique_path=historique_path,
         nb_annees=args.years,
         batch_size=args.batch_size,
         add_trend=args.add_trend,
         model_dir=args.model_dir,
-        config_path=args.config
+        config_path=args.config,
+        prm=prm
     )
 
-    # Sauvegarder
-    output_path = save_longterm_predictions(predictions, args.output, args.config)
+    # Sauvegarder avec le PRM
+    output_path = save_longterm_predictions(predictions, args.output, args.config, prm=prm)
 
     print("\n" + "✅" * 30)
     print("PRÉDICTION LONG TERME TERMINÉE")
@@ -234,6 +293,10 @@ def main():
                             help='Ignorer le feature engineering')
     train_parser.add_argument('--no-tensorboard', action='store_true',
                             help='Désactiver TensorBoard')
+    train_parser.add_argument('--epochs', type=int, default=50,
+                            help='Nombre d\'époques d\'entraînement (défaut: 50)')
+    train_parser.add_argument('--batch-size', type=int, default=32,
+                            help='Taille des batchs (défaut: 32)')
 
     # Commande PREDICT
     predict_parser = subparsers.add_parser('predict', help='Faire des prédictions')
@@ -253,8 +316,8 @@ def main():
     # Commande PREDICT-LONGTERM (3 ans avec moyennes climatiques)
     longterm_parser = subparsers.add_parser('predict-longterm',
                                           help='Prédictions long terme (3 ans) avec moyennes climatiques')
-    longterm_parser.add_argument('--historique', type=str, required=True,
-                               help='Chemin vers les données historiques complètes')
+    longterm_parser.add_argument('--prm', type=str, required=True,
+                               help='Code PRM du site (ex: 30000540191777)')
     longterm_parser.add_argument('--years', type=int, default=3,
                                help='Nombre d\'années à prédire (défaut: 3)')
     longterm_parser.add_argument('--batch-size', type=int, default=1000,

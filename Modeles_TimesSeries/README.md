@@ -1,146 +1,162 @@
-# Projet de Prédiction de Consommation Énergétique
+# 📊 Prédiction de Consommation Énergétique
 
-Modèle LSTM pour la prédiction horaire de consommation énergétique avec 48h de fenêtre glissante.
+Système de prédiction de consommation énergétique basé sur LSTM pour plusieurs sites avec dashboard interactif.
 
-## � Nouveautés - Architecture Multi-Sites
+## 🎯 Fonctionnalités
 
-- ✅ **Support multi-sites** : Entraînez des modèles pour plusieurs sites (PRM) automatiquement
-- ✅ **DataLoader modulaire** : Architecture flexible pour CSV (actuel) et base de données (futur)
-- ✅ **Organisation améliorée** : Structure `data/raw` avec sous-dossiers (sites, meteo, prix)
-- ✅ **Migration facile** : Script de migration pour organiser vos fichiers existants
+- ✅ **Multi-sites** : Gestion simultanée de plusieurs sites (PRM)
+- ✅ **Prédictions long terme** : 3 ans avec moyennes climatiques
+- ✅ **Dashboard interactif** : Visualisation Streamlit
+- ✅ **Architecture modulaire** : Prêt pour base de données
 
-📖 **Documentation complète** : Voir [DATA_ARCHITECTURE.md](DATA_ARCHITECTURE.md)
+---
 
-## 🏗️ Structure du Projet
+## 🏗️ Architecture
 
 ```
 Modeles_TimesSeries/
-├── config/
-│   └── config.yaml              # Configuration centralisée
+├── main.py                         # CLI principal
+├── config/config.yaml              # Configuration
 ├── data/
-│   ├── raw/                     # 🆕 Données brutes organisées
-│   │   ├── sites/              # Fichiers dataclean_prm_*.csv
-│   │   ├── meteo/              # Fichiers météo
-│   │   └── prix/               # Fichiers prix spot
-│   ├── processed/               # Données prétraitées
-│   └── predictions/             # Prédictions sauvegardées
-├── models/
-│   └── saved/                   # Modèles entraînés (par site)
+│   ├── raw/
+│   │   ├── sites/                  # dataclean_prm_{PRM}.csv
+│   │   ├── meteo/                  # meteo_moyennes_{ans}ans_{PRM}.csv
+│   │   └── prix/                   # prix_spot.csv
+│   ├── processed/                  # data_preprocessed_{PRM}.csv
+│   └── predictions/                # predictions_longterm_{ans}ans_{PRM}.csv
+├── models/saved/                   # lstm_energy_forecast_latest_{PRM}.h5
 ├── src/
-│   ├── __init__.py
-│   ├── data_loader.py          # 🆕 Chargement des données (CSV/DB)
-│   ├── preprocessing.py         # Nettoyage et conversion
-│   ├── feature_engineering.py  # Création des features
-│   ├── model.py                # Architecture LSTM
-│   ├── train.py                # Entraînement
-│   ├── predict.py              # Prédiction itérative
-│   └── utils.py                # Fonctions utilitaires
-├── notebooks/                   # Notebooks d'exploration
-├── main.py                      # Point d'entrée CLI
-├── migrate_data.py             # 🆕 Script de migration des données
-├── DATA_ARCHITECTURE.md        # 🆕 Documentation architecture
-└── requirements.txt             # Dépendances
+│   ├── data_loader.py              # Chargement données
+│   ├── preprocessing.py            # Nettoyage
+│   ├── feature_engineering.py      # Features (lags, rolling)
+│   ├── model.py                    # LSTM
+│   ├── train.py                    # Entraînement
+│   ├── predict_longterm.py         # Prédictions 3 ans
+│   └── generate_climate_averages.py # Moyennes climat
+├── dashboard_longterm.py           # Dashboard Streamlit
+└── generate_all_predictions.py     # Batch tous sites
 ```
 
-## 🚀 Installation
+---
 
+## 🚀 Quick Start
+
+### Installation
 ```bash
 pip install -r requirements.txt
 ```
 
-## 📂 Préparation des Données
-
-### Option 1 : Migration automatique (recommandé)
-
-Si vous avez déjà des fichiers CSV dans `../data/dataclean/` :
-
-```bash
-python migrate_data.py
-```
-
-Ce script copiera automatiquement vos fichiers dans la nouvelle structure.
-
-### Option 2 : Copie manuelle
-
-Copiez vos fichiers dans la nouvelle structure :
-
-```bash
-# Sites (fichiers dataclean_prm_*.csv)
-cp ../data/dataclean/dataclean_prm_*.csv data/raw/sites/
-
-# Météo
-cp ../data/dataclean/previsions_meteo.csv data/raw/meteo/
-
-# Prix
-cp ../data/dataclean/prix_spot.csv data/raw/prix/
-```
-
-### Vérification
-
+### Lister les sites
 ```bash
 python main.py list-sites
 ```
 
-## 📊 Utilisation
-
-### Lister les sites disponibles
-
+### Entraîner
 ```bash
-python main.py list-sites
-```
+# Un site
+python main.py train --prm 30000540191777
 
-### Entraînement
-
-```bash
-# Entraîner un site spécifique
-python main.py train --prm 30000250086126
-
-# Entraîner tous les sites disponibles
+# Tous les sites
 python main.py train --all-sites
-
-# Sans preprocessing/features (déjà fait)
-python main.py train --prm 30000250086126 --skip-preprocessing --skip-features
 ```
 
-### Prédiction
-
+### Prédictions 3 ans
 ```bash
-python main.py predict \
-    --historique data/raw/historique_48h.csv \
-    --meteo data/raw/meteo_15jours.csv \
-    --horizon 360
+# Un site
+python main.py predict-longterm --prm 30000540191777 --years 3
+
+# Tous les sites
+python generate_all_predictions.py
 ```
 
-## 🧠 Architecture du Modèle
+### Dashboard
+```bash
+streamlit run dashboard_longterm.py
+```
 
-- **Bidirectional LSTM** (96 unités)
-- **LSTM** (48 unités)
-- **LSTM** (24 unités)
-- **Dense** (16 unités)
-- **Dense** (1 unité) - sortie
+---
 
-**Hyperparamètres optimaux:**
-- Window: 48h
-- Dropout: 0.25
-- L2 Reg: 0.005
-- Learning Rate: 0.0005
-- Batch Size: 64
+## 📋 Commandes Principales
 
-## 📈 Performances
+| Commande | Description |
+|----------|-------------|
+| `python main.py list-sites` | Liste sites disponibles |
+| `python main.py train --prm XXXXX` | Entraîne un site |
+| `python main.py predict-longterm --prm XXXXX --years 3` | Prédictions 3 ans |
+| `python generate_all_predictions.py` | Batch tous sites |
+| `streamlit run dashboard_longterm.py` | Lance dashboard |
 
-- **MAE**: 41.30 kW
-- **R²**: 0.8953
-- **MAPE**: 36.40%
+---
 
-## 🔑 Features (14 sélectionnées)
+## 📊 Pipeline
 
-- Temporelles cycliques: `jour_sin`, `heure_sin`, `jour_cos`, `heure_cos`, `jour_ferie`
-- Météo: `temperature`, `humidite`
-- Historiques: `puissance_lag_1`, `puissance_roll_12`, `puissance_std_24`, `puissance_max_24`
-- Interactions: `temp_x_heure_sin`, `temp_x_heure_cos`
+```
+DONNÉES → PREPROCESSING → FEATURE ENGINEERING → ENTRAÎNEMENT → PRÉDICTIONS → DASHBOARD
+```
 
-## 📝 Notes
+1. **Données brutes** : `data/raw/sites/dataclean_prm_{PRM}.csv`
+2. **Preprocessing** : Nettoyage + normalisation
+3. **Features** : Lags (1-48h), rolling means, features temporelles
+4. **Entraînement** : LSTM → `models/saved/lstm_energy_forecast_latest_{PRM}.h5`
+5. **Prédictions** : 3 ans avec moyennes climatiques
+6. **Visualisation** : Dashboard Streamlit
 
-- Besoin d'au moins **48h d'historique** pour les prédictions
-- Les prédictions utilisent un **processus itératif** : chaque prédiction alimente les features de la suivante
-- Les valeurs négatives sont automatiquement clippées à 0
+---
+
+## 🔧 Modèle LSTM
+
+### Architecture
+- **Input** : 48h × 13 features
+- **LSTM** : 2 couches (128 → 64 units)
+- **Dropout** : 0.2
+- **Output** : Prédiction 1h
+
+### Features
+- **Temporelles** : heure, jour, mois, weekend
+- **Historiques** : lags, rolling means
+- **Météo** : température, humidité
+- **Interactions** : température × heure
+
+---
+
+## 📁 Fichiers Par Site
+
+Pour le PRM `30000540191777` :
+
+```
+data/processed/
+  └── data_preprocessed_30000540191777.csv
+data/raw/meteo/
+  └── meteo_moyennes_3ans_30000540191777.csv
+models/saved/
+  ├── lstm_energy_forecast_latest_30000540191777.h5
+  ├── scalers_latest_30000540191777.pkl
+  └── config_latest_30000540191777.json
+data/predictions/
+  ├── predictions_longterm_3ans_30000540191777.csv
+  └── predictions_longterm_3ans_30000540191777_stats.txt
+```
+
+---
+
+## 📖 Documentation
+
+- **[QUICK_START.md](QUICK_START.md)** - Démarrage rapide
+- **[GUIDE_PREDICTIONS_LONGTERM.md](GUIDE_PREDICTIONS_LONGTERM.md)** - Guide prédictions
+- **[DASHBOARD_GUIDE.md](DASHBOARD_GUIDE.md)** - Guide dashboard
+- **[WORKFLOW_MULTI_SITES.md](WORKFLOW_MULTI_SITES.md)** - Workflow multi-sites
+- **[DATA_ARCHITECTURE.md](DATA_ARCHITECTURE.md)** - Architecture données
+
+---
+
+## ⚠️ Notes
+
+- **Prédictions long terme** : Basées sur moyennes climatiques (indicatives)
+- **Fenêtre minimum** : 48h d'historique requis
+- **Fichiers PRM** : Tous incluent le PRM pour traçabilité
+- **Dashboard** : Détecte automatiquement tous les sites
+
+---
+
+**Version** : 2.0 - Multi-Sites
+**Mise à jour** : Février 2026

@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 import yaml
 from pathlib import Path
+import holidays
 
 
 def load_config(config_path="config/config.yaml"):
@@ -32,6 +33,82 @@ def load_raw_data(filepath_or_df):
     return df
 
 
+def aggregate_by_hour(df):
+    """
+    Agrège les données de puissance par heure.
+    Crée la colonne puissance_moy_heure à partir de la colonne puissance.
+    Préserve les colonnes météo (moyenne horaire).
+
+    Args:
+        df: DataFrame avec colonnes datetime et puissance
+
+    Returns:
+        DataFrame agrégé par heure
+    """
+    df = df.copy()
+
+    # Convertir datetime
+    df['datetime'] = pd.to_datetime(df['datetime'])
+
+    # Extraire date et heure
+    df['date'] = df['datetime'].dt.date
+    df['date'] = pd.to_datetime(df['date'])
+    df['heure'] = df['datetime'].dt.hour
+
+    # Vérifier si on a une colonne PRM
+    group_cols = ['date', 'heure']
+    if 'prm' in df.columns:
+        group_cols = ['prm'] + group_cols
+
+    # Identifier les colonnes météo à préserver
+    meteo_cols = ['temperature', 'humidite', 'precipitation', 'vitesse_vent']
+    available_meteo = [col for col in meteo_cols if col in df.columns]
+
+    # Construire le dictionnaire d'agrégation
+    agg_dict = {
+        'puissance': ['mean', 'sum']
+    }
+
+    # Ajouter les colonnes météo (moyenne)
+    for col in available_meteo:
+        agg_dict[col] = 'mean'
+
+    # Agrégation par heure
+    df_agg = df.groupby(group_cols).agg(agg_dict).reset_index()
+
+    # Aplatir les colonnes multi-index
+    df_agg.columns = [
+        '_'.join(col).strip('_') if col[1] else col[0]
+        for col in df_agg.columns.values
+    ]
+
+    # Renommer les colonnes de puissance
+    df_agg = df_agg.rename(columns={
+        'puissance_mean': 'puissance_moy_heure',
+        'puissance_sum': 'puissance_sum_heure'
+    })
+
+    # Renommer les colonnes météo (enlever le suffixe _mean)
+    meteo_rename = {f'{col}_mean': col for col in available_meteo}
+    df_agg = df_agg.rename(columns=meteo_rename)
+
+    # Recréer datetime
+    df_agg['datetime'] = pd.to_datetime(df_agg['date']) + pd.to_timedelta(df_agg['heure'], unit='h')
+
+    # Trier et nettoyer
+    df_agg = df_agg.sort_values('datetime').reset_index(drop=True)
+    df_agg = df_agg.drop(columns=['date', 'heure'])
+    df_agg = df_agg.drop_duplicates(subset=['datetime'])
+
+    print(f"✅ Agrégation horaire effectuée : {len(df_agg)} lignes")
+    print(f"   Plage : {df_agg['puissance_moy_heure'].min():.2f} - {df_agg['puissance_moy_heure'].max():.2f} W")
+    print(f"   Moyenne : {df_agg['puissance_moy_heure'].mean():.2f} W")
+    if available_meteo:
+        print(f"   📊 Colonnes météo préservées : {', '.join(available_meteo)}")
+
+    return df_agg
+
+
 def convert_to_kw(df, column="puissance_moy_heure"):
     """
     Convertit la puissance de Wh en kW.
@@ -44,10 +121,38 @@ def convert_to_kw(df, column="puissance_moy_heure"):
         DataFrame avec la conversion effectuée
     """
     df = df.copy()
+
+    # Vérifier si la colonne existe
+    if column not in df.columns:
+        print(f"⚠️  Colonne '{column}' non trouvée, conversion ignorée")
+        return df
+
     df[column] = df[column] / 1000
     print(f"✅ Conversion en kW effectuée")
     print(f"   Plage : {df[column].min():.2f} - {df[column].max():.2f} kW")
     print(f"   Moyenne : {df[column].mean():.2f} kW")
+    return df
+
+
+def add_jour_ferie(df):
+    """
+    Ajoute la colonne jour_ferie (jours fériés français).
+
+    Args:
+        df: DataFrame avec colonne datetime
+
+    Returns:
+        DataFrame avec colonne jour_ferie ajoutée
+    """
+    df = df.copy()
+
+    if 'jour_ferie' not in df.columns:
+        jours_feries_fr = holidays.France()
+        df['jour_ferie'] = df['datetime'].dt.normalize().map(
+            lambda d: int(d.date() in jours_feries_fr)
+        )
+        print(f"✅ Colonne 'jour_ferie' ajoutée ({df['jour_ferie'].sum()} jours fériés détectés)")
+
     return df
 
 
@@ -74,6 +179,9 @@ def clean_data(df):
     if duplicates > 0:
         print(f"⚠️ {duplicates} doublons supprimés")
         df = df.drop_duplicates(subset=['datetime'])
+
+    # Ajouter jour_ferie
+    df = add_jour_ferie(df)
 
     # Afficher les valeurs manquantes
     missing = df.isnull().sum()
@@ -122,12 +230,28 @@ def preprocess_pipeline(input_filepath_or_df, output_filepath=None,
     # Charger les données
     df = load_raw_data(input_filepath_or_df)
 
+    # Vérifier si on a besoin d'agréger
+    if 'puissance' in df.columns and 'puissance_moy_heure' not in df.columns:
+        print("\n🔄 Agrégation par heure nécessaire...")
+        df = aggregate_by_hour(df)
+
     # Convertir en kW
     target_col = config.get('target', 'puissance_moy_heure')
     df = convert_to_kw(df, column=target_col)
 
     # Nettoyer
     df = clean_data(df)
+
+    # Vérifier que les colonnes météo sont présentes
+    meteo_cols = ['temperature', 'humidite']
+    missing_meteo = [col for col in meteo_cols if col not in df.columns]
+    if missing_meteo:
+        print(f"⚠️  Colonnes météo manquantes : {missing_meteo}")
+        print(f"   📋 Colonnes disponibles : {list(df.columns)}")
+        raise ValueError(
+            f"Les colonnes météo {missing_meteo} sont manquantes. "
+            "Assurez-vous que les données météo ont été fusionnées avec les données de consommation."
+        )
 
     # Sauvegarder si chemin fourni
     if output_filepath:
