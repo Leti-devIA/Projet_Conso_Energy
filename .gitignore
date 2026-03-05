@@ -48,6 +48,7 @@ htmlcov/
 logs/
 *.log
 events.out.tfevents.*
+mlruns/
 
 # =========================
 # Modèles & artefacts lourds
@@ -187,3 +188,5 @@ old/
 *.pdf
 *.loo
 *.lo1
+
+.gitignore
