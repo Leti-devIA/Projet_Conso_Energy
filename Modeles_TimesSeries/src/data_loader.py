@@ -27,6 +27,9 @@ class DataLoader(ABC):
             config_path: Chemin vers le fichier de configuration
         """
         self.config = self._load_config(config_path)
+        self.raw_path = Path(self.config['data']['raw'])
+        self.processed_path = Path(self.config['data']['processed'])
+        self.predictions_path = Path(self.config['data']['predictions'])
 
     def _load_config(self, config_path: str) -> dict:
         """Charge la configuration depuis le fichier YAML."""
@@ -34,7 +37,7 @@ class DataLoader(ABC):
             return yaml.safe_load(f)
 
     @abstractmethod
-    def load_site_data(self, prm: Optional[str] = None,
+    def load_dataclean(self, prm: Optional[str] = None,
                        start_date: Optional[str] = None,
                        end_date: Optional[str] = None) -> pd.DataFrame:
         """
@@ -69,7 +72,7 @@ class DataLoader(ABC):
             raise ValueError("Le paramètre 'prm' est obligatoire pour charger les données météo")
 
         # Chemin du fichier météo pour ce site
-        meteo_path = self.raw_path / "meteo" / f"meteo_moyennes_3ans_{prm}.csv"
+        meteo_path = self.raw_path / "meteo" / f"meteo_horaire_{prm}.csv"
 
         if not meteo_path.exists():
             raise FileNotFoundError(
@@ -141,6 +144,8 @@ class DataLoader(ABC):
         if site.empty:
             return {'prm': prm, 'ville': 'Inconnu', 'code_postal': '', 'lat': None, 'lon': None}
         return site.iloc[0].to_dict()
+
+
 
 
 class CSVDataLoader(DataLoader):
@@ -219,7 +224,7 @@ class CSVDataLoader(DataLoader):
 
         return sorted(prms)
 
-    def load_site_data(self, prm: Optional[str] = None,
+    def load_dataclean(self, prm: Optional[str] = None,
                        start_date: Optional[str] = None,
                        end_date: Optional[str] = None) -> pd.DataFrame:
         """
@@ -275,6 +280,102 @@ class CSVDataLoader(DataLoader):
         print(f"✅ {len(df)} lignes chargées")
         return df
 
+
+    def load_processed_site_data(
+        self,
+        prm: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
+    ) -> pd.DataFrame:
+        """
+        Charge les données déjà preprocessées + feature engineering
+        depuis data/processed.
+
+        Args:
+            prm: Identifiant PRM du site
+            start_date: Date de début (YYYY-MM-DD)
+            end_date: Date de fin (YYYY-MM-DD)
+
+        Returns:
+            DataFrame des données processed
+        """
+
+        filepath = self.processed_path / f"data_processed_{prm}.csv"
+
+        if not filepath.exists():
+            raise FileNotFoundError(
+                f"❌ Fichier processed introuvable pour PRM {prm} : {filepath}"
+            )
+
+        df = pd.read_csv(filepath, sep=",", decimal=".")
+        df["prm"] = str(prm)
+
+        # Gestion dates
+        if "datetime" in df.columns:
+            df["datetime"] = pd.to_datetime(df["datetime"])
+
+            if start_date:
+                start_date = pd.to_datetime(start_date)
+                df = df[df["datetime"] >= start_date]
+
+            if end_date:
+                end_date = pd.to_datetime(end_date)
+                df = df[df["datetime"] <= end_date]
+
+        return df.sort_values("datetime").reset_index(drop=True)
+
+
+
+    def load_predictions(
+        self,
+        model_name: str,
+        prm: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
+    ) -> pd.DataFrame:
+        """
+        Charge les prédictions sauvegardées d'un modèle donné.
+
+        Structure attendue :
+        data/predictions/{model_name}/predictions_prm_XXXXX.csv
+
+        Args:
+            model_name: Nom du modèle (ex: 'lstm_v1')
+            prm: Identifiant PRM
+            start_date: Date de début (YYYY-MM-DD)
+            end_date: Date de fin (YYYY-MM-DD)
+
+        Returns:
+            DataFrame des prédictions
+        """
+
+        predictions_path = self.predictions_path / model_name
+        filepath = predictions_path / f"predictions_prm_{prm}.csv"
+
+        if not filepath.exists():
+            raise FileNotFoundError(
+                f"❌ Fichier de prédictions introuvable : {filepath}"
+            )
+
+        df = pd.read_csv(filepath, sep=",", decimal=".")
+        df["prm"] = str(prm)
+
+        # Gestion dates
+        if "datetime" in df.columns:
+            df["datetime"] = pd.to_datetime(df["datetime"])
+
+            if start_date:
+                start_date = pd.to_datetime(start_date)
+                df = df[df["datetime"] >= start_date]
+
+            if end_date:
+                end_date = pd.to_datetime(end_date)
+                df = df[df["datetime"] <= end_date]
+
+        return df.sort_values("datetime").reset_index(drop=True)
+
+
+
     def load_meteo_data(self, prm: Optional[str] = None,
                         start_date: Optional[str] = None,
                         end_date: Optional[str] = None) -> pd.DataFrame:
@@ -293,7 +394,7 @@ class CSVDataLoader(DataLoader):
 
         if prm:
             # Charger la météo spécifique au site
-            filepath = meteo_path / f"meteo_moyennes_3ans_{prm}.csv"
+            filepath = meteo_path / f"meteo_horaire_{prm}.csv"
 
             if not filepath.exists():
                 raise FileNotFoundError(
@@ -304,7 +405,7 @@ class CSVDataLoader(DataLoader):
             print(f"📂 Chargement météo pour PRM {prm}...")
         else:
             # Chercher le fichier de météo générique (plusieurs noms possibles)
-            possible_files = ["previsions_meteo.csv", "meteo.csv", "meteo_moyennes_3ans.csv"]
+            possible_files = ["previsions_meteo.csv", "meteo.csv", f"meteo_horaire_{prm}.csv"]
             filepath = None
 
             for filename in possible_files:
@@ -378,6 +479,12 @@ class CSVDataLoader(DataLoader):
         print(f"✅ {len(df)} lignes chargées")
         return df
 
+    def save_processed_site_data(self, df, prm):
+        filepath = self.processed_path / f"data_processed_{prm}.csv"
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        df.to_csv(filepath, index=False)
+        print(f"✅ Données sauvegardées : {filepath}")
+
 
 class DatabaseDataLoader(DataLoader):
     """
@@ -438,7 +545,7 @@ class DatabaseDataLoader(DataLoader):
             "Utilisez CSVDataLoader pour le moment."
         )
 
-    def load_site_data(self, prm: Optional[str] = None,
+    def load_dataclean(self, prm: Optional[str] = None,
                        start_date: Optional[str] = None,
                        end_date: Optional[str] = None) -> pd.DataFrame:
         """
@@ -459,12 +566,14 @@ class DatabaseDataLoader(DataLoader):
             "Utilisez CSVDataLoader pour le moment."
         )
 
-    def load_meteo_data(self, start_date: Optional[str] = None,
-                        end_date: Optional[str] = None) -> pd.DataFrame:
+    def load_meteo_data(self, prm: Optional[str] = None,
+                    start_date: Optional[str] = None,
+                    end_date: Optional[str] = None) -> pd.DataFrame:
         """
         Charge les données météorologiques depuis la base de données.
 
         Args:
+            prm: Code PRM du site (obligatoire pour charger la météo spécifique)
             start_date: Date de début (format YYYY-MM-DD)
             end_date: Date de fin (format YYYY-MM-DD)
 
@@ -514,7 +623,7 @@ def get_data_loader(source: str = "csv", config_path: str = "config/config.yaml"
     Example:
         >>> loader = get_data_loader('csv')
         >>> sites = loader.list_available_sites()
-        >>> df = loader.load_site_data(prm='30000250086126')
+        >>> df = loader.load_dataclean(prm='30000250086126')
     """
     if source.lower() == 'csv':
         return CSVDataLoader(config_path)

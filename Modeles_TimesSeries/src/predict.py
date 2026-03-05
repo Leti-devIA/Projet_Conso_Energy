@@ -1,282 +1,225 @@
 """
-Script de prédiction itérative avec sauvegarde des résultats.
+Prédiction Prophet long terme (1-3 ans)
 """
+
 import pandas as pd
 import numpy as np
 import pickle
-import json
-import yaml
 from pathlib import Path
-from tensorflow.keras.models import load_model
 
-from feature_engineering import (
-    create_temporal_features,
-    create_lag_features,
-    create_rolling_features,
-    create_statistical_features,
-    create_interaction_features
-)
+from .feature_engineering import feature_engineering_pipeline
+from .utils import load_config, build_jour_ferie_index
 
+# ===================================================
+# CONFIGURATION
+# ===================================================
+config = load_config("config/config.yaml")
 
-def load_config(config_path="config/config.yaml"):
-    """Charge la configuration."""
-    with open(config_path, 'r', encoding='utf-8') as f:
-        return yaml.safe_load(f)
-
-
-def load_model_artifacts(model_dir="models/saved", use_latest=True, model_suffix=None):
-    """
-    Charge le modèle, les scalers et la configuration.
-
-    Args:
-        model_dir: Répertoire des modèles sauvegardés
-        use_latest: Si True, charge la version 'latest', sinon demande le timestamp
-        model_suffix: Suffixe du modèle (ex: 'lstm_energy_forecast_30000540191777') pour charger un modèle spécifique
-
-    Returns:
-        Tuple (model, scaler_X, scaler_y, config)
-    """
+# ============================================================
+# CHARGEMENT MODÈLE
+# ============================================================
+def load_prophet_model(model_dir="models/saved", prm=None):
     model_dir = Path(model_dir)
+    candidates = []
 
-    if use_latest:
-        if model_suffix:
-            # Charger le modèle spécifique au site
-            model_path = model_dir / f"lstm_energy_forecast_latest_{model_suffix}.h5"
-            scalers_path = model_dir / f"scalers_latest_{model_suffix}.pkl"
-            config_path = model_dir / f"config_latest_{model_suffix}.json"
-        else:
-            # Charger le modèle générique
-            model_path = model_dir / "lstm_energy_forecast_latest.h5"
-            scalers_path = model_dir / "scalers_latest.pkl"
-            config_path = model_dir / "config_latest.json"
-    else:
-        # Lister les modèles disponibles
-        models = list(model_dir.glob("lstm_energy_forecast_*.h5"))
-        print("Modèles disponibles :")
-        for i, m in enumerate(models):
-            print(f"  {i}: {m.name}")
+    if prm:
+        p = model_dir / f"prophet_model_{prm}_latest.pkl"
+        if p.exists():
+            candidates.append(p)
+        candidates += sorted(model_dir.glob(f"prophet_model_{prm}_2*.pkl"))
 
-        choice = int(input("Choisir le modèle (numéro) : "))
-        model_path = models[choice]
+    p = model_dir / "prophet_model_latest.pkl"
+    if p.exists():
+        candidates.append(p)
 
-        # Extraire le timestamp
-        timestamp = model_path.stem.split('_')[-1]
-        scalers_path = model_dir / f"scalers_{timestamp}.pkl"
-        config_path = model_dir / f"config_{timestamp}.json"
+    candidates += sorted(model_dir.glob("prophet_model_2*.pkl"))
 
-    print(f"📦 Chargement du modèle : {model_path}")
-    model = load_model(model_path)
+    if not candidates:
+        raise FileNotFoundError(f"Aucun modèle Prophet trouvé dans {model_dir}")
 
-    print(f"📦 Chargement des scalers : {scalers_path}")
-    with open(scalers_path, 'rb') as f:
-        scalers = pickle.load(f)
-    scaler_X = scalers['scaler_X']
-    scaler_y = scalers['scaler_y']
-
-    print(f"📦 Chargement de la config : {config_path}")
-    with open(config_path, 'r', encoding='utf-8') as f:
-        model_config = json.load(f)
-
-    return model, scaler_X, scaler_y, model_config
+    model_path = candidates[0]
+    print(f"📦 Modèle chargé : {model_path.name}")
+    with open(model_path, "rb") as f:
+        return pickle.load(f)
 
 
-def create_all_features(df, target_col):
+# ============================================================
+# CONSTRUCTION DATAFRAME FUTUR
+# ============================================================
+def build_future_from_features(df_features, meteo_future_df, model):
     """
-    Crée toutes les features nécessaires pour la prédiction.
-
-    Args:
-        df: DataFrame avec colonnes datetime, puissance_kw, temperature, humidite, jour_ferie
-        target_col: Nom de la colonne cible
-
-    Returns:
-        DataFrame avec toutes les features
+    Prépare le DataFrame futur pour Prophet à partir des features pré-calculées.
+    - Recycle les colonnes de feature_engineering_pipeline
+    - Ajoute météo future et jours fériés
     """
-    df = df.copy()
+    regressors = list(model.extra_regressors.keys())
 
-    # Features temporelles
-    df = create_temporal_features(df)
+    last_datetime = df_features["datetime"].max()
+    horizon = len(meteo_future_df)
+    future_datetimes = pd.date_range(start=last_datetime + pd.Timedelta(hours=1),
+                                     periods=horizon, freq='H')
 
-    # Features historiques
-    df = create_lag_features(df, target_col, lags=[1, 2, 3, 24, 48])
-    df = create_rolling_features(df, target_col, windows=[3, 6, 12, 24])
-    df = create_statistical_features(df, target_col)
+    # DataFrame futur
+    df_future = pd.DataFrame({"ds": future_datetimes})
 
-    # Interactions
-    df = create_interaction_features(df)
+    # ── Regressors cycliques
+    cyclic = ['heure_sin','heure_cos','jour_sin','jour_cos','is_weekend']
+    for feat in cyclic:
+        if feat in regressors:
+            # Recalcul cyclique pour les dates futures
+            if feat == 'heure_sin':
+                df_future[feat] = np.sin(2*np.pi*df_future['ds'].dt.hour/24)
+            elif feat == 'heure_cos':
+                df_future[feat] = np.cos(2*np.pi*df_future['ds'].dt.hour/24)
+            elif feat == 'jour_sin':
+                df_future[feat] = np.sin(2*np.pi*df_future['ds'].dt.dayofweek/7)
+            elif feat == 'jour_cos':
+                df_future[feat] = np.cos(2*np.pi*df_future['ds'].dt.dayofweek/7)
+            elif feat == 'is_weekend':
+                df_future[feat] = (df_future['ds'].dt.dayofweek >= 5).astype(int)
 
-    return df
-
-
-def predict_future(historique_df, meteo_future_df, model_dir="models/saved",
-                   config_path="config/config.yaml", horizon=None, model_suffix=None):
-    """
-    Prédit les consommations futures de manière itérative.
-
-    Args:
-        historique_df: DataFrame avec au moins 48h d'historique
-                      Colonnes : datetime, puissance_kw, temperature, humidite, jour_ferie
-        meteo_future_df: DataFrame avec données météo futures
-                        Colonnes : datetime, temperature, humidite, jour_ferie
-        model_dir: Répertoire des modèles
-        config_path: Chemin vers la configuration
-        horizon: Nombre d'heures à prédire (si None, utilise len(meteo_future_df))
-        model_suffix: Suffixe du modèle à charger (ex: 'lstm_energy_forecast_30000540191777')
-
-    Returns:
-        DataFrame avec les prédictions
-    """
-    print("=" * 60)
-    print("PRÉDICTION ITÉRATIVE")
-    print("=" * 60)
-
-    # Charger la configuration
-    config = load_config(config_path)
-
-    # Charger le modèle et les artifacts
-    model, scaler_X, scaler_y, model_config = load_model_artifacts(model_dir, model_suffix=model_suffix)
-
-    window = model_config['model_architecture']['window']
-    features = model_config['features']
-    target_col = model_config['target']
-
-    # Déterminer l'horizon
-    if horizon is None:
-        horizon = len(meteo_future_df)
-    horizon = min(horizon, len(meteo_future_df))
-
-    print(f"✅ Modèle chargé")
-    print(f"✅ Window size : {window}")
-    print(f"✅ Nombre de features : {len(features)}")
-    print(f"✅ Horizon de prédiction : {horizon} heures")
-
-    # Vérifier qu'on a assez d'historique
-    if len(historique_df) < window:
-        raise ValueError(f"Besoin d'au moins {window}h d'historique, {len(historique_df)}h fourni")
-
-    # Préparer les données
-    historique_df = historique_df.copy()
+    # ── Météo future
     meteo_future_df = meteo_future_df.copy()
+    meteo_future_df['ds'] = pd.to_datetime(meteo_future_df['datetime']).dt.round('H')
+    meteo_future_df = meteo_future_df.drop_duplicates(subset=['ds']).set_index('ds')
 
-    historique_df['datetime'] = pd.to_datetime(historique_df['datetime'])
-    meteo_future_df['datetime'] = pd.to_datetime(meteo_future_df['datetime'])
+    for col in ['temperature','humidite','vitesse_vent','couverture_nuages']:
+        if col in regressors:
+            df_future[col] = df_future['ds'].map(meteo_future_df[col])
+            n_missing = df_future[col].isna().sum()
+            if n_missing > 0:
+                print(f"⚠️ {n_missing} NaN détectés pour '{col}' → interpolation linéaire")
+                df_future[col] = df_future[col].interpolate(method='linear')
+                df_future[col] = df_future[col].fillna(method='bfill').fillna(method='ffill')
 
-    historique_df = historique_df.sort_values('datetime').reset_index(drop=True)
-    meteo_future_df = meteo_future_df.sort_values('datetime').reset_index(drop=True)
+    # ── Jours fériés
+    years = df_future['ds'].dt.year.unique()
+    ferie_set = build_jour_ferie_index(years)
+    if 'is_holiday' in regressors:
+        df_future['is_holiday'] = df_future['ds'].dt.date.isin(ferie_set).astype(int)
+    if 'jour_ferie' in regressors:
+        df_future['jour_ferie'] = df_future['ds'].dt.date.isin(ferie_set).astype(int)
 
-    # Renommer la colonne cible si nécessaire
-    if 'puissance_kw' in historique_df.columns and target_col not in historique_df.columns:
-        historique_df[target_col] = historique_df['puissance_kw']
+    # ── Cap/Floor logistic si nécessaire
+    if hasattr(model, 'growth') and model.growth == 'logistic':
+        df_future['cap'] = df_features['cap'].iloc[-1]
+        df_future['floor'] = df_features['floor'].iloc[-1]
 
-    # Prendre les dernières 48h d'historique
-    df_work = historique_df.tail(window).copy()
+    # ── Remplir les éventuels NaN
+    for r in regressors:
+        if r not in df_future.columns:
+            df_future[r] = 0
 
-    # Créer les features pour l'historique
-    df_work = create_all_features(df_work, target_col)
-
-    # Boucle de prédiction itérative
-    predictions = []
-
-    print(f"\n🔮 Début des prédictions...")
-
-    for i in range(horizon):
-        # Obtenir la dernière fenêtre
-        window_data = df_work.tail(window).copy()
-
-        # Vérifier que toutes les features sont présentes
-        missing = [f for f in features if f not in window_data.columns]
-        if missing:
-            print(f"⚠️ Features manquantes : {missing}")
-            break
-
-        # Sélectionner les features
-        X_window = window_data[features].values
-
-        # Remplacer les NaN par 0
-        X_window = np.nan_to_num(X_window, nan=0.0)
-
-        # Normaliser
-        X_window_scaled = scaler_X.transform(X_window)
-
-        # Reshape pour le modèle
-        X_window_seq = X_window_scaled.reshape(1, window, len(features))
-
-        # Prédire
-        y_pred_scaled = model.predict(X_window_seq, verbose=0)
-        y_pred = scaler_y.inverse_transform(y_pred_scaled)[0, 0]
-
-        # Clipper les valeurs négatives
-        y_pred = max(0, y_pred)
-
-        # Obtenir la date/heure future
-        next_datetime = meteo_future_df.iloc[i]['datetime']
-
-        # Ajouter la prédiction
-        predictions.append({
-            'datetime': next_datetime,
-            'puissance_kw_pred': y_pred
-        })
-
-        # Créer une nouvelle ligne avec la prédiction
-        new_row = pd.DataFrame([{
-            'datetime': next_datetime,
-            target_col: y_pred,
-            'temperature': meteo_future_df.iloc[i]['temperature'],
-            'humidite': meteo_future_df.iloc[i]['humidite'],
-            'jour_ferie': meteo_future_df.iloc[i]['jour_ferie']
-        }])
-
-        # Ajouter au DataFrame de travail
-        df_work = pd.concat([df_work, new_row], ignore_index=True)
-
-        # Recréer toutes les features
-        df_work = create_all_features(df_work, target_col)
-
-        # Afficher la progression
-        if (i + 1) % 24 == 0:
-            print(f"  ✓ {i + 1}/{horizon} heures prédites")
-
-    # Créer le DataFrame de résultats
-    df_predictions = pd.DataFrame(predictions)
-
-    print(f"\n✅ {len(df_predictions)} prédictions générées")
-    print(f"📅 Période : {df_predictions['datetime'].min()} → {df_predictions['datetime'].max()}")
-    print(f"📊 Consommation prédite :")
-    print(f"   Min     : {df_predictions['puissance_kw_pred'].min():.2f} kW")
-    print(f"   Max     : {df_predictions['puissance_kw_pred'].max():.2f} kW")
-    print(f"   Moyenne : {df_predictions['puissance_kw_pred'].mean():.2f} kW")
-    print("=" * 60)
-
-    return df_predictions
+    return df_future
 
 
-def save_predictions(df_predictions, output_path=None, config_path="config/config.yaml"):
+# ============================================================
+# PREDICTION FUTURE
+# ============================================================
+def predict_future(prm, meteo_future_df, model_dir="models/saved", config_path="config/config.yaml"):
     """
-    Sauvegarde les prédictions.
-
-    Args:
-        df_predictions: DataFrame avec les prédictions
-        output_path: Chemin de sortie (si None, utilise data/predictions/)
-        config_path: Chemin vers la configuration
+    Prédit sur un horizon long terme pour un PRM donné
     """
-    from datetime import datetime
-    
-    if output_path is None:
-        config = load_config(config_path)
-        predictions_dir = Path(config['data']['predictions'])
-        predictions_dir.mkdir(parents=True, exist_ok=True)
+    print(f"\n🔮 PRÉDICTION PROPHET LONG TERME — PRM {prm}")
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = predictions_dir / f"predictions_{timestamp}.csv"
+    # ── Charger le modèle
+    model = load_prophet_model(model_dir, prm=prm)
+    regressors = list(model.extra_regressors.keys())
+    print(f"📋 Regressors attendus : {regressors}")
 
-    df_predictions.to_csv(output_path, index=False)
-    print(f"\n✅ Prédictions sauvegardées : {output_path}")
+    # ── Charger les features calculées pour ce PRM
+    df_features, _ = feature_engineering_pipeline(prm, source='csv', config_path=config_path)
 
-    return output_path
+    # ── Construire le DataFrame futur
+    df_future = build_future_from_features(df_features, meteo_future_df, model)
 
-    # Prédire
-    # predictions = predict_future(historique, meteo_future, horizon=360)
+    # ── Prédiction
+    forecast = model.predict(df_future)
 
-    # Sauvegarder
-    # save_predictions(predictions)
+    # ── Clipping négatif
+    clip_negative = load_config(config_path).get('prediction', {}).get('clip_negative', True)
+    if clip_negative:
+        forecast['yhat'] = forecast['yhat'].clip(lower=0)
+        forecast['yhat_lower'] = forecast['yhat_lower'].clip(lower=0)
 
-    print("⚠️ Décommenter le code ci-dessus et fournir les données pour exécuter")
+    # ── Résultat final
+    df_pred = pd.DataFrame({
+        'datetime': forecast['ds'],
+        'yhat': forecast['yhat'],
+        'yhat_lower': forecast['yhat_lower'],
+        'yhat_upper': forecast['yhat_upper'],
+    })
+
+    print(f"✅ {len(df_pred)} heures prédites")
+    return df_pred
+
+
+# ============================================================
+# FORMAT POUR DASHBOARD
+# ============================================================
+def format_predictions_for_dashboard(df_pred, historique_start):
+    df = df_pred.copy()
+    df['puissance_kw_pred'] = df['yhat']
+    df['puissance_kw_pred_lower'] = df['yhat_lower']
+    df['puissance_kw_pred_upper'] = df['yhat_upper']
+    df['jours_depuis_debut'] = (df['datetime'] - pd.to_datetime(historique_start)).dt.total_seconds()/86400
+    df['annee'] = df['datetime'].dt.year
+    return df[['datetime','puissance_kw_pred','puissance_kw_pred_lower','puissance_kw_pred_upper','jours_depuis_debut','annee']]
+
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Prédiction Prophet long terme")
+    parser.add_argument("--prm", type=str, help="Numéro PRM (résout les chemins automatiquement)")
+    parser.add_argument("--historique", type=str, default=None, help="Fichier historique CSV")
+    parser.add_argument("--meteo", type=str, default=None, help="Fichier météo CSV (horaire)")
+    parser.add_argument("--horizon", type=int, default=None, help="Heures à prédire (défaut : config.yaml)")
+    parser.add_argument("--model-dir", type=str, default="models/saved")
+    parser.add_argument("--config", type=str, default="config/config.yaml")
+    parser.add_argument("--output", type=str, default=None, help="Fichier de sortie CSV")
+
+    args = parser.parse_args()
+
+    # Mode PRM : résolution automatique des chemins
+    if args.prm:
+        args.historique = args.historique or f"data/processed/data_preprocessed_{args.prm}.csv"
+        args.meteo      = args.meteo      or f"data/raw/meteo/meteo_horaire_{args.prm}.csv"
+        args.output     = args.output     or f"data/predictions/prophet_predictions_{args.prm}.csv"
+
+    if not args.historique or not args.meteo:
+        print("❌ Erreur : utilisez --prm ou (--historique + --meteo)")
+        print("  python src/predict.py --prm 30000250086126")
+        print("  python src/predict.py --historique data.csv --meteo meteo.csv --output out.csv")
+        exit(1)
+
+    print(f"📂 Historique : {args.historique}")
+    print(f"📂 Météo      : {args.meteo}")
+
+    historique = pd.read_csv(args.historique)
+    meteo      = pd.read_csv(args.meteo)
+
+    print(f"   {len(historique):,} lignes historiques")
+    print(f"   {len(meteo):,} lignes météo")
+
+    # Prédiction
+    meteo_df = pd.read_csv(args.meteo)
+    df_pred = predict_future(prm=args.prm, meteo_future_df=meteo_df,
+                             model_dir=args.model_dir, config_path=args.config)
+
+    # Formater pour le dashboard
+    df_csv = format_predictions_for_dashboard(
+        df_pred,
+        historique_start=historique["datetime"].min()
+    )
+
+    # Sauvegarde
+    output_path = args.output or f"data/predictions/prophet_predictions_{args.prm}.csv"
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    df_csv.to_csv(output_path, index=False)
+    print(f"\n💾 Prédictions sauvegardées : {output_path}")

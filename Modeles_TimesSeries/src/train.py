@@ -1,275 +1,449 @@
 """
-Script d'entraînement du modèle LSTM.
+Entraînement Prophet multi-sites — un modèle par PRM.
+
+Chaque site produit :
+  - models/saved/prophet_model_{PRM}_{timestamp}.pkl
+  - models/saved/prophet_model_{PRM}_latest.pkl
+  - models/saved/prophet_metrics_{PRM}.json
+
+Utilisation :
+  # Tous les sites détectés automatiquement
+  python src/train.py
+
+  # Un site spécifique
+  python src/train.py --prm 30000250086126
+
+  # Plusieurs sites
+  python src/train.py --prm 30000250086126 30000540191777
 """
+
+import argparse
 import pandas as pd
 import numpy as np
-import yaml
 import pickle
 import json
 from pathlib import Path
 from datetime import datetime
-from sklearn.preprocessing import StandardScaler
-from tensorflow.keras.callbacks import EarlyStopping, TensorBoard, ReduceLROnPlateau
-
-from model import build_lstm_model
-from feature_engineering import get_feature_list
-from utils import create_sequences, evaluate_model
-
-
-def load_config(config_path="config/config.yaml"):
-    """Charge la configuration."""
-    with open(config_path, 'r', encoding='utf-8') as f:
-        return yaml.safe_load(f)
+from .data_loader import get_data_loader
+from .utils import load_config, detect_prms
+from .preprocessing import preprocess_pipeline
+from .feature_engineering import feature_engineering_pipeline, save_features
+from prophet import Prophet
+from prophet.diagnostics import cross_validation, performance_metrics
 
 
-def prepare_data(df, config):
+try:
+    from mlflow_utils import setup_mlflow, log_prophet_training
+    MLFLOW_AVAILABLE = True
+except ImportError:
+    MLFLOW_AVAILABLE = False
+
+# ===================================================
+# CONFIGURATION
+# ===================================================
+config = load_config("config/config.yaml")
+
+
+
+# ===================================================
+# FONCTION DE PRÉPARATION DES DONNÉES
+# ===================================================
+
+def prepare_data_for_prophet(df, target_col, config):
+    df = df.copy()
+    df["ds"] = pd.to_datetime(df["datetime"])
+    df["y"]  = df[target_col]
+    df = df.dropna(subset=["y"])
+
+    # Correction unités : preprocessing divise par 1000 à tort
+    y_max = df["y"].max()
+    if y_max < 10:
+        print(f"   ⚠️  Target normalisée (max={y_max:.3f}) → ×1000")
+        df["y"] = df["y"] * 1000
+
+    # Filtre bruit de mesure
+    filter_cfg = config["prophet"].get("filter_low_values", {})
+    if filter_cfg.get("enabled", False):
+        threshold = filter_cfg.get("threshold_kw", 0.0)
+        n_before = len(df)
+        df = df[df["y"] >= threshold]
+        print(f"   Filtrage < {threshold} W : {n_before - len(df)} lignes supprimées")
+
+    # Garder uniquement les colonnes nécessaires
+    regressors = config["prophet"]["regressors"]
+    allowed_cols = ["ds", "y"] + regressors
+    available_cols = [c for c in allowed_cols if c in df.columns]
+
+    missing = [c for c in regressors if c not in df.columns]
+    if missing:
+        print(f"   ⚠️  Regressors absents : {missing}")
+
+    return df[available_cols]
+
+
+
+# ============================================================
+# FONCTION DE MÉTRIQUES
+# ============================================================
+def evaluate_model(model, df_val):
+    df_pred = df_val.copy()
+
+    if model.growth == "logistic":
+        df_pred["cap"]   = df_val["cap"]
+        df_pred["floor"] = df_val["floor"]
+
+    forecast = model.predict(df_pred)
+
+    y_true = df_val["y"].values
+    y_pred = forecast["yhat"].values
+    mask   = ~(np.isnan(y_true) | np.isnan(y_pred))
+    y_true, y_pred = y_true[mask], y_pred[mask]
+
+    mae  = float(np.mean(np.abs(y_true - y_pred)))
+    rmse = float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
+    mape = float(np.mean(np.abs((y_true - y_pred) / (y_true + 1e-8))) * 100)
+
+    ss_res = np.sum((y_true - y_pred) ** 2)
+    ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
+    r2 = float(1 - ss_res / ss_tot) if ss_tot > 0 else 0.0
+
+    return {"mae": mae, "rmse": rmse, "mape": mape, "r2": r2}
+
+
+
+# ============================================================
+# CROSS-VALIDATION PROPHET
+# ============================================================
+def run_cross_validation(model, df_train, config, prm):
     """
-    Prépare les données pour l'entraînement.
+    Cross-validation temporelle Prophet.
 
-    Args:
-        df: DataFrame avec features
-        config: Configuration
+    Principe :
+    - initial  : taille de la première fenêtre d'entraînement
+    - period   : intervalle entre chaque fenêtre
+    - horizon  : durée de prédiction évaluée à chaque fenêtre
 
-    Returns:
-        Tuple (X_train, y_train, X_val, y_val, X_test, y_test, scaler_X, scaler_y)
+    Plus robuste qu'un simple split train/val car évalue
+    le modèle sur plusieurs périodes temporelles différentes.
     """
-    print("=" * 60)
-    print("PRÉPARATION DES DONNÉES")
-    print("=" * 60)
+    cv_cfg = config.get("cross_validation", {})
 
-    # Récupérer les features optimisées
-    features = config['features_optimized']
-    target = config['target']
+    if not cv_cfg.get("enabled", False):
+        return None
 
-    # Vérifier que toutes les features sont présentes
-    missing_features = [f for f in features if f not in df.columns]
-    if missing_features:
-        raise ValueError(f"Features manquantes : {missing_features}")
+    try:
+        initial = cv_cfg.get("initial", "365 days")
+        period  = cv_cfg.get("period",  "90 days")
+        horizon = cv_cfg.get("horizon", "30 days")
 
-    # Extraire X et y
-    df = df.sort_values('datetime').reset_index(drop=True)
-    X = df[features].values
-    y = df[target].values.reshape(-1, 1)
+        print(f"--- Cross-Validation ---")
+        print(f"   initial={initial}  period={period}  horizon={horizon}")
 
-    print(f"✅ Features sélectionnées : {len(features)}")
-    print(f"✅ Target : {target}")
-
-    # Normalisation avec StandardScaler
-    scaler_X = StandardScaler()
-    scaler_y = StandardScaler()
-
-    X_scaled = scaler_X.fit_transform(X)
-    y_scaled = scaler_y.fit_transform(y)
-
-    print(f"✅ Normalisation effectuée (StandardScaler)")
-
-    # Créer les séquences
-    window = config['model']['window']
-    X_seq, y_seq = create_sequences(X_scaled, y_scaled, window)
-
-    print(f"✅ Séquences créées (window={window})")
-
-    # Split train/val/test
-    train_split = config['training']['train_split']
-    val_split = config['training']['val_split']
-
-    train_size = int(train_split * len(X_seq))
-    val_size = int(val_split * len(X_seq))
-
-    X_train = X_seq[:train_size]
-    y_train = y_seq[:train_size]
-
-    X_val = X_seq[train_size:train_size+val_size]
-    y_val = y_seq[train_size:train_size+val_size]
-
-    X_test = X_seq[train_size+val_size:]
-    y_test = y_seq[train_size+val_size:]
-
-    print(f"✅ Données splitées :")
-    print(f"   Train      : {len(X_train)} séquences ({train_split*100:.0f}%)")
-    print(f"   Validation : {len(X_val)} séquences ({val_split*100:.0f}%)")
-    print(f"   Test       : {len(X_test)} séquences ({(1-train_split-val_split)*100:.0f}%)")
-    print("=" * 60)
-
-    return X_train, y_train, X_val, y_val, X_test, y_test, scaler_X, scaler_y
-
-
-def train_model(data_path, config_path="config/config.yaml", use_tensorboard=True,
-                model_suffix=""):
-    """
-    Entraîne le modèle LSTM.
-
-    Args:
-        data_path: Chemin vers les données avec features
-        config_path: Chemin vers la configuration
-        use_tensorboard: Activer TensorBoard
-        model_suffix: Suffixe pour identifier le modèle (ex: PRM du site)
-
-    Returns:
-        Tuple (model, history, metrics_dict)
-    """
-    # Charger la configuration
-    config = load_config(config_path)
-
-    # Charger les données
-    print(f"📂 Chargement des données : {data_path}")
-    df = pd.read_csv(data_path)
-
-    # Préparer les données
-    X_train, y_train, X_val, y_val, X_test, y_test, scaler_X, scaler_y = prepare_data(df, config)
-
-    # Construire le modèle
-    n_features = len(config['features_optimized'])
-    window = config['model']['window']
-    model = build_lstm_model(input_shape=(window, n_features), config_path=config_path)
-
-    # Callbacks
-    callbacks = []
-
-    # Early Stopping
-    early_stop = EarlyStopping(
-        monitor='val_loss',
-        patience=config['callbacks']['early_stopping']['patience'],
-        restore_best_weights=config['callbacks']['early_stopping']['restore_best_weights'],
-        verbose=1
-    )
-    callbacks.append(early_stop)
-
-    # Reduce Learning Rate
-    reduce_lr = ReduceLROnPlateau(
-        monitor='val_loss',
-        factor=config['callbacks']['reduce_lr']['factor'],
-        patience=config['callbacks']['reduce_lr']['patience'],
-        min_lr=config['callbacks']['reduce_lr']['min_lr'],
-        verbose=1
-    )
-    callbacks.append(reduce_lr)
-
-    # TensorBoard
-    if use_tensorboard:
-        log_dir = config['callbacks']['tensorboard']['log_dir']
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        suffix = f"_{model_suffix}" if model_suffix else ""
-        tensorboard_cb = TensorBoard(
-            log_dir=f"{log_dir}/{timestamp}{suffix}",
-            histogram_freq=1
+        df_cv = cross_validation(
+            model,
+            initial=initial,
+            period=period,
+            horizon=horizon,
+            parallel="threads"
         )
-        callbacks.append(tensorboard_cb)
-        print(f"📊 TensorBoard activé : {log_dir}/{timestamp}{suffix}")
 
-    # Entraînement
-    print("\n" + "=" * 60)
-    print("ENTRAÎNEMENT DU MODÈLE")
-    print("=" * 60)
+        metrics_cv = performance_metrics(df_cv)
 
-    batch_size = config['training']['batch_size']
-    epochs = config['training']['epochs']
+        mae_cv  = float(metrics_cv["mae"].mean())
+        rmse_cv = float(metrics_cv["rmse"].mean())
+        mape_cv = float(metrics_cv["mape"].mean() * 100)
 
-    history = model.fit(
-        X_train, y_train,
-        validation_data=(X_val, y_val),
-        batch_size=batch_size,
-        epochs=epochs,
-        callbacks=callbacks,
-        verbose=1
+        print(f"   CV MAE  : {mae_cv:.2f} W")
+        print(f"   CV RMSE : {rmse_cv:.2f} W")
+        print(f"   CV MAPE : {mape_cv:.1f}%")
+
+        return {"cv_mae": mae_cv, "cv_rmse": rmse_cv, "cv_mape": mape_cv}
+
+    except Exception as e:
+        print(f"   ⚠️  Cross-validation échouée : {e}")
+        return None
+
+
+# ============================================================
+# BASELINE NAÏVE (même heure -7 jours)
+# ============================================================
+def naive_baseline(df_full, df_val):
+    lag = 7 * 24
+    val_start_idx = len(df_full) - len(df_val)
+
+    if val_start_idx < lag:
+        print("   ⚠️  Baseline impossible (historique < 7 jours)")
+        return
+
+    y_true = df_val["y"].values
+    y_pred = df_full["y"].iloc[val_start_idx - lag : val_start_idx - lag + len(df_val)].values
+    mask   = ~(np.isnan(y_true) | np.isnan(y_pred))
+
+    mae  = np.mean(np.abs(y_true[mask] - y_pred[mask]))
+    rmse = np.sqrt(np.mean((y_true[mask] - y_pred[mask]) ** 2))
+
+    print(f"   Baseline (j-7) → MAE={mae:.2f} W  RMSE={rmse:.2f} W")
+
+
+# ============================================================
+# CONSTRUCTION DU MODÈLE
+# ============================================================
+def build_prophet_model(config, prm=None):
+    cfg = config["prophet"]
+
+    # Overrides par site (optionnel dans config.yaml)
+    # Exemple :
+    #   site_overrides:
+    #     "30000650805048":
+    #       changepoint_prior_scale: 0.01
+    #       growth: "flat"
+    overrides = {}
+    if prm and "site_overrides" in config:
+        overrides = config["site_overrides"].get(str(prm), {})
+        if overrides:
+            print(f"   ⚙️  Overrides appliqués pour {prm} : {overrides}")
+
+    growth = overrides.get("growth", cfg.get("growth", "linear"))
+    changepoint_prior_scale = overrides.get("changepoint_prior_scale", cfg["changepoint_prior_scale"])
+    seasonality_prior_scale = overrides.get("seasonality_prior_scale", cfg["seasonality_prior_scale"])
+    seasonality_mode = overrides.get("seasonality_mode", cfg["seasonality_mode"])
+    fourier_order_daily  = overrides.get("fourier_order_daily",  cfg.get("fourier_order_daily",  10))
+    fourier_order_weekly = overrides.get("fourier_order_weekly", cfg.get("fourier_order_weekly",  5))
+    fourier_order_yearly = overrides.get("fourier_order_yearly", cfg.get("fourier_order_yearly", 10))
+    holidays_prior_scale = overrides.get("holidays_prior_scale", cfg.get("holidays_prior_scale", 10))
+    n_changepoints = overrides.get("n_changepoints", cfg.get("n_changepoints", 25))
+    changepoint_range = overrides.get("changepoint_range", cfg.get("changepoint_range", 0.8))
+
+    model = Prophet(
+        yearly_seasonality=False,
+        weekly_seasonality=False,
+        daily_seasonality=False,
+        growth=growth,
+        seasonality_mode=seasonality_mode,
+        changepoint_prior_scale=changepoint_prior_scale,
+        seasonality_prior_scale=seasonality_prior_scale,
+        holidays_prior_scale=holidays_prior_scale,
+        n_changepoints=n_changepoints,
+        changepoint_range=changepoint_range,
+        interval_width=0.95
     )
 
-    print("\n" + "=" * 60)
-    print("ENTRAÎNEMENT TERMINÉ")
-    print("=" * 60)
+    model.add_seasonality(name="daily",  period=1,      fourier_order=fourier_order_daily)
+    model.add_seasonality(name="weekly", period=7,      fourier_order=fourier_order_weekly)
+    model.add_seasonality(name="yearly", period=365.25, fourier_order=fourier_order_yearly)
 
-    # Évaluation
-    print("\n" + "=" * 60)
-    print("ÉVALUATION SUR TEST SET")
-    print("=" * 60)
-
-    metrics = evaluate_model(model, X_test, y_test, scaler_y)
-
-    # Sauvegarder le modèle
-    save_model(model, scaler_X, scaler_y, config, metrics, model_suffix)
-
-    return model, history, metrics
+    return model
 
 
-def save_model(model, scaler_X, scaler_y, config, metrics, model_suffix=""):
-    """
-    Sauvegarde le modèle, les scalers et la configuration.
-
-    Args:
-        model: Modèle Keras entraîné
-        scaler_X: Scaler des features
-        scaler_y: Scaler de la cible
-        config: Configuration
-        metrics: Métriques d'évaluation
-        model_suffix: Suffixe pour identifier le modèle (ex: PRM du site)
-    """
-    print("\n" + "=" * 60)
-    print("SAUVEGARDE DU MODÈLE")
-    print("=" * 60)
-
-    # Créer le dossier de sauvegarde
-    save_dir = Path(config['models']['save_dir'])
+# ============================================================
+# SAUVEGARDE
+# ============================================================
+def save_model(model, config, metrics, prm):
+    save_dir = Path(config["models"]["save_dir"])
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    model_name = config['models']['model_name']
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    suffix = f"_{model_suffix}" if model_suffix else ""
 
-    # Sauvegarder le modèle
-    model_path = save_dir / f"{model_name}_{timestamp}{suffix}.h5"
-    model.save(model_path)
-    print(f"✅ Modèle sauvegardé : {model_path}")
+    # Modèle versionné
+    model_path = save_dir / f"prophet_model_{prm}_{timestamp}.pkl"
+    with open(model_path, "wb") as f:
+        pickle.dump(model, f)
 
-    # Sauvegarder les scalers
-    scalers_path = save_dir / f"scalers_{timestamp}{suffix}.pkl"
-    with open(scalers_path, 'wb') as f:
-        pickle.dump({'scaler_X': scaler_X, 'scaler_y': scaler_y}, f)
-    print(f"✅ Scalers sauvegardés : {scalers_path}")
+    # Alias latest par PRM
+    latest_path = save_dir / f"prophet_model_{prm}_latest.pkl"
+    with open(latest_path, "wb") as f:
+        pickle.dump(model, f)
 
-    # Sauvegarder la configuration complète
-    config_save = {
-        'timestamp': timestamp,
-        'site_prm': model_suffix if model_suffix else "all",
-        'model_architecture': {
-            'lstm1_units': config['model']['lstm1_units'],
-            'lstm2_units': config['model']['lstm2_units'],
-            'lstm3_units': config['model']['lstm3_units'],
-            'dropout_rate': config['model']['dropout_rate'],
-            'l2_reg': config['model']['l2_reg'],
-            'window': config['model']['window']
-        },
-        'training': {
-            'batch_size': config['training']['batch_size'],
-            'epochs': config['training']['epochs'],
-            'learning_rate': config['training']['learning_rate']
-        },
-        'features': config['features_optimized'],
-        'target': config['target'],
-        'metrics': metrics
+    # Métriques JSON
+    metrics_data = {
+        "prm":              prm,
+        "timestamp":        timestamp,
+        "metrics":          metrics,
+        "regressors":       list(model.extra_regressors.keys()),
+        "seasonality_mode": model.seasonality_mode,
     }
+    metrics_path = save_dir / f"prophet_metrics_{prm}.json"
+    with open(metrics_path, "w", encoding="utf-8") as f:
+        json.dump(metrics_data, f, indent=2, ensure_ascii=False)
 
-    config_path = save_dir / f"config_{timestamp}{suffix}.json"
-    with open(config_path, 'w', encoding='utf-8') as f:
-        json.dump(config_save, f, indent=4, ensure_ascii=False)
-    print(f"✅ Configuration sauvegardée : {config_path}")
+    print(f"   ✅ {model_path.name}")
+    print(f"   ✅ {latest_path.name}")
+    print(f"   ✅ {metrics_path.name}")
 
-    # Sauvegarder également en version "latest" pour faciliter l'utilisation
-    model.save(save_dir / f"{model_name}_latest{suffix}.h5")
-    with open(save_dir / f"scalers_latest{suffix}.pkl", 'wb') as f:
-        pickle.dump({'scaler_X': scaler_X, 'scaler_y': scaler_y}, f)
-    with open(save_dir / f"config_latest{suffix}.json", 'w', encoding='utf-8') as f:
-        json.dump(config_save, f, indent=4, ensure_ascii=False)
 
-    print(f"✅ Version 'latest{suffix}' créée pour utilisation facile")
-    print("=" * 60)
+# ============================================================
+# ENTRAÎNEMENT D'UN SITE
+# ============================================================
+def train_one_site(data_path, config, prm, config_path):
+    """Entraîne et sauvegarde un modèle Prophet pour un PRM donné."""
 
+    target_col      = config["target"]
+    regressors      = config["prophet"]["regressors"]
+    validation_days = config.get("validation", {}).get("days", 30)
+
+    print(f"\n{'='*60}")
+    print(f"  SITE : {prm}")
+    print(f"{'='*60}")
+
+    try:
+        print("\n--- Preprocessing ---")
+        df_pre = preprocess_pipeline(prm=prm)
+
+        print("\n--- Feature Engineering ---")
+        df_feat, config = feature_engineering_pipeline(prm=prm, source="csv", config_path=config_path)
+
+        # Initialiser le DataLoader et sauvegarder les features
+        loader = get_data_loader("csv", config_path)
+        save_features(df_feat, prm, loader)
+
+        print("\n--- Préparation Prophet ---")
+        df_prophet = prepare_data_for_prophet(df_feat, target_col, config)
+
+        # Gestion logistic growth
+        growth = config["prophet"].get("growth", "linear")
+        if prm and "site_overrides" in config:
+            growth = config["site_overrides"].get(str(prm), {}).get("growth", growth)
+        df_prophet["cap"] = df_feat["cap"]
+        df_prophet["floor"] = df_feat["floor"]
+
+        # Split temporel
+        split_date = df_prophet["ds"].max() - pd.Timedelta(days=validation_days)
+        df_train   = df_prophet[df_prophet["ds"] < split_date].copy()
+        df_val     = df_prophet[df_prophet["ds"] >= split_date].copy()
+
+        print(f"\n   Train : {df_train['ds'].min().date()} → {df_train['ds'].max().date()} ({len(df_train):,} pts)")
+        print(f"   Val   : {df_val['ds'].min().date()}   → {df_val['ds'].max().date()}   ({len(df_val):,} pts)")
+
+        # Vérification données suffisantes
+        if len(df_train) < 24 * 30:
+            print(f"   ⚠️  Données insuffisantes ({len(df_train)} pts < 30 jours) — site ignoré")
+            return None, None
+
+        # Vérification regressors
+        missing = [r for r in regressors if r not in df_train.columns]
+        if missing:
+            raise ValueError(f"Regressors manquants dans df_train : {missing}")
+
+        # Modèle
+        model = build_prophet_model(config, prm=prm)
+        for col in regressors:
+            model.add_regressor(col, standardize=False)
+
+        print("\n--- Entraînement ---")
+        model.fit(df_train)
+
+        # Évaluation
+        print("\n--- Évaluation ---")
+        naive_baseline(df_prophet, df_val)
+        metrics = evaluate_model(model, df_val)
+        print(f"   Prophet → MAE={metrics['mae']:.2f} W  RMSE={metrics['rmse']:.2f} W  "
+              f"MAPE={metrics['mape']:.1f}%  R²={metrics['r2']:.4f}")
+
+        # Cross-validation (optionnelle, activée dans config.yaml)
+        cv_metrics = run_cross_validation(model, df_train, config, prm)
+        if cv_metrics:
+            metrics.update(cv_metrics)
+
+        # Sauvegarde
+        print("\n--- Sauvegarde ---")
+        save_model(model, config, metrics, prm)
+
+        # MLflow tracking (activé via config.yaml : mlflow.enabled: true)
+        if MLFLOW_AVAILABLE and config.get("mlflow", {}).get("enabled", False):
+            try:
+                print("\n--- MLflow ---")
+                setup_mlflow(config_path)
+
+                # Adapter les clés de métriques au format attendu par mlflow_utils
+                metrics_mlflow = {
+                    "MAE":  metrics["mae"],
+                    "RMSE": metrics["rmse"],
+                    "MAPE": metrics["mape"],
+                    "R2":   metrics["r2"],
+                }
+                run_id = log_prophet_training(
+                    model=model,
+                    df_train=df_train,
+                    df_val=df_val,
+                    metrics=metrics_mlflow,
+                    config=config,
+                    model_suffix=prm
+                )
+                metrics["mlflow_run_id"] = run_id
+                print(f"   ✅ Run MLflow : {run_id}")
+            except Exception as e:
+                print(f"   ⚠️  MLflow échoué (non bloquant) : {e}")
+        elif not MLFLOW_AVAILABLE:
+            pass  # mlflow_utils.py absent — silencieux
+        else:
+            print("\n   ℹ️  MLflow désactivé (mlflow.enabled: false dans config.yaml)")
+
+        return model, metrics
+
+    except Exception as e:
+        print(f"\n   ❌ Erreur site {prm} : {e}")
+        import traceback
+        traceback.print_exc()
+        return None, None
+
+
+# ============================================================
+# MAIN
+# ============================================================
 
 if __name__ == "__main__":
-    # Entraîner le modèle
-    data_path = "data/processed/data_with_features.csv"
+    parser = argparse.ArgumentParser(description="Entraînement Prophet multi-sites")
+    parser.add_argument(
+        "--prm", type=str, nargs="+", default=None,
+        help="PRM(s) à entraîner. Si absent, tous les sites sont traités."
+    )
+    parser.add_argument(
+        "--config", type=str, default="config/config.yaml",
+        help="Chemin vers config.yaml"
+    )
+    args = parser.parse_args()
 
-    model, history, metrics = train_model(data_path)
+    config = load_config(args.config)
+    if config is None:
+        raise ValueError(f"Impossible de charger la config depuis {args.config}")
+    raw_data_dir = Path(config["data"]["raw"]) / "sites"
 
-    print("\n" + "🎉" * 30)
-    print("MODÈLE PRÊT POUR LA PRODUCTION")
-    print("🎉" * 30)
+    # Détecter tous les sites disponibles
+    all_prm_files = detect_prms(raw_data_dir)
+
+    if not all_prm_files:
+        raise FileNotFoundError(f"Aucun fichier dataclean_prm_*.csv dans {raw_data_dir}")
+
+    # Filtrer selon --prm si fourni
+    if args.prm:
+        prm_files = {}
+        for prm in args.prm:
+            if prm in all_prm_files:
+                prm_files[prm] = all_prm_files[prm]
+            else:
+                print(f"⚠️  PRM {prm} introuvable dans {raw_data_dir}")
+    else:
+        prm_files = all_prm_files
+
+    if not prm_files:
+        raise ValueError("Aucun site valide à entraîner.")
+
+    print(f"\n🏭 {len(prm_files)} site(s) à entraîner : {list(prm_files.keys())}")
+
+    # Entraîner chaque site
+    results = {}
+    for prm, data_path in prm_files.items():
+        _, metrics = train_one_site(data_path, config, prm, args.config)
+        results[prm] = metrics
+
+    # Résumé
+    print(f"\n{'='*60}")
+    print("  RÉSUMÉ")
+    print(f"{'='*60}")
+    print(f"  {'PRM':<20} {'MAE':>8} {'RMSE':>8} {'MAPE':>7} {'R²':>8}")
+    print(f"  {'-'*55}")
+    for prm, m in results.items():
+        if m:
+            print(f"  {prm:<20} {m['mae']:>7.1f}  {m['rmse']:>7.1f}  {m['mape']:>6.1f}%  {m['r2']:>7.4f}")
+        else:
+            print(f"  {prm:<20}  {'ÉCHEC':>40}")

@@ -141,8 +141,6 @@ data/predictions/
 
 ## 📖 Documentation
 
-- **[QUICK_START.md](QUICK_START.md)** - Démarrage rapide
-- **[GUIDE_PREDICTIONS_LONGTERM.md](GUIDE_PREDICTIONS_LONGTERM.md)** - Guide prédictions
 - **[DASHBOARD_GUIDE.md](DASHBOARD_GUIDE.md)** - Guide dashboard
 - **[WORKFLOW_MULTI_SITES.md](WORKFLOW_MULTI_SITES.md)** - Workflow multi-sites
 - **[DATA_ARCHITECTURE.md](DATA_ARCHITECTURE.md)** - Architecture données

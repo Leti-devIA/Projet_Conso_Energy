@@ -1,127 +1,100 @@
-# Configuration du projet de prédiction de consommation énergétique
-
-# Source des données ('csv' ou 'database')
-data_source: "csv"
-
-# Chemins des données
+data_source: csv
 data:
-  raw: "data/raw"
-  processed: "data/processed"
-  predictions: "data/predictions"
-
-# Configuration pour la base de données (FUTURE)
-# database:
-#   host: "localhost"
-#   port: 5432
-#   name: "energy_db"
-#   user: "user"
-#   password: "password"
-
-# Sites à traiter (laisser vide pour tous les sites disponibles)
-sites:
-  # Liste des PRMs à traiter, exemples:
-  # - "30000250086126"
-  # - "30000260159032"
-  # - "30000540185031"
-  # Si vide ou commenté, tous les sites du dossier data/raw/sites seront traités
-  prms: []
-
-# Chemins des modèles
+  raw: data/raw
+  processed: data/processed
+  predictions: data/predictions
+target: puissance_moy_heure
 models:
-  save_dir: "models/saved"
-  model_name: "lstm_energy_forecast"
-
-# Features utilisées
-features:
-  meteo:
-    - "temperature"
-    - "humidite"
-    - "vitesse_vent"
-    - "couverture_nuages"
-
-  temporelles:
-    - "heure_sin"
-    - "heure_cos"
-    - "jour_sin"
-    - "jour_cos"
-    - "jour_ferie"
-
-  lags:
-    - "puissance_lag_1"
-    - "puissance_lag_2"
-    - "puissance_lag_3"
-    - "puissance_lag_24"
-    - "puissance_lag_48"
-
-  rolling:
-    - "puissance_roll_3"
-    - "puissance_roll_6"
-    - "puissance_roll_12"
-    - "puissance_roll_24"
-
-  statistiques:
-    - "puissance_std_12"
-    - "puissance_std_24"
-    - "puissance_min_24"
-    - "puissance_max_24"
-
-  interactions:
-    - "temp_x_heure_sin"
-    - "temp_x_heure_cos"
-
-# Features optimales (14 features sélectionnées)
-features_optimized:
-  - "jour_sin"
-  - "heure_sin"
-  - "jour_ferie"
-  - "heure_cos"
-  - "jour_cos"
-  - "temperature"
-  - "humidite"
-  - "temp_x_heure_cos"
-  - "temp_x_heure_sin"
-  - "puissance_roll_12"
-  - "puissance_std_24"
-  - "puissance_lag_1"
-  - "puissance_max_24"
-
-# Colonne cible
-target: "puissance_moy_heure"
-
-# Hyperparamètres du modèle
-model:
-  window: 48
-  lstm1_units: 96
-  lstm2_units: 48
-  lstm3_units: 24
-  dropout_rate: 0.25
-  l2_reg: 0.005
-
-# Hyperparamètres d'entraînement
-training:
-  batch_size: 64
-  epochs: 150
-  learning_rate: 0.0005
-  train_split: 0.70
-  val_split: 0.15
-  test_split: 0.15
-
-# Callbacks
-callbacks:
-  early_stopping:
-    patience: 20
-    restore_best_weights: true
-
-  reduce_lr:
-    factor: 0.5
-    patience: 10
-    min_lr: 0.00001
-
-  tensorboard:
-    log_dir: "logs/fit"
-
-# Prédiction
+  save_dir: models/saved
+prophet:
+  seasonality_mode: additive
+  yearly_seasonality: false
+  weekly_seasonality: false
+  daily_seasonality: false
+  fourier_order_daily: 10
+  fourier_order_weekly: 5
+  fourier_order_yearly: 10
+  changepoint_prior_scale: 0.005
+  seasonality_prior_scale: 10.0
+  regressors:
+  - temperature
+  - humidite
+  - precipitation
+  - couverture_nuages
+  - vitesse_vent
+  - is_holiday
+  - heure_sin
+  - heure_cos
+  - jour_sin
+  - jour_cos
+  - is_weekend
+  - temp_x_heure_sin
+  - temp_x_heure_cos
+  filter_low_values:
+    enabled: true
+    threshold_kw: 20
+validation:
+  days: 120
 prediction:
-  horizon: 360  # 15 jours * 24h
+  horizon: 8784
   clip_negative: true
-  output_format: "csv"
+  output_format: csv
+site_overrides:
+  '30000650805048':
+    growth: flat
+    changepoint_prior_scale: 0.01
+    seasonality_prior_scale: 10
+    seasonality_mode: multiplicative
+    fourier_order_daily: 15
+    fourier_order_weekly: 8
+    fourier_order_yearly: 10
+    n_changepoints: 25
+    changepoint_range: 0.8
+    holidays_prior_scale: 10
+  '30000540191777':
+    growth: flat
+    changepoint_prior_scale: 0.01
+    seasonality_prior_scale: 10
+    seasonality_mode: multiplicative
+    fourier_order_daily: 15
+    fourier_order_weekly: 8
+    fourier_order_yearly: 10
+    n_changepoints: 25
+    changepoint_range: 0.8
+    holidays_prior_scale: 10
+grid_search:
+  changepoint_prior_scale:
+  - 0.001
+  - 0.01
+  - 0.05
+  - 0.1
+  - 0.3
+  seasonality_prior_scale:
+  - 1.0
+  - 5.0
+  - 10.0
+  - 20.0
+  seasonality_mode:
+  - additive
+  - multiplicative
+  initial: 365 days
+  period: 90 days
+  horizon: 30 days
+  metric: rmse
+cross_validation:
+  enabled: false
+  initial: 365 days
+  period: 90 days
+  horizon: 30 days
+mlflow:
+  enabled: true
+  tracking_uri: mlruns
+  experiment_name: Prophet_Energy_Forecast
+logistic_growth:
+  cap_by_site:
+    '30000540191777': 573.4924999999998
+    '30000650805048': 3230822.5
+  floor: 16.333333333333336
+  floor_by_site:
+    '30000540191777': 16.333333333333336
+    '30000650805048': 30000.0
