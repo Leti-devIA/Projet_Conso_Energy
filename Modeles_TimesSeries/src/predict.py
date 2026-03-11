@@ -159,12 +159,12 @@ def predict_future(prm, meteo_future_df, model_dir="models/saved", config_path="
 # ============================================================
 def format_predictions_for_dashboard(df_pred, historique_start):
     df = df_pred.copy()
-    df['puissance_kw_pred'] = df['yhat']
-    df['puissance_kw_pred_lower'] = df['yhat_lower']
-    df['puissance_kw_pred_upper'] = df['yhat_upper']
+    df['puissance_moy_heure_pred'] = df['yhat']
+    df['puissance_moy_heure_pred_lower'] = df['yhat_lower']
+    df['puissance_moy_heure_pred_upper'] = df['yhat_upper']
     df['jours_depuis_debut'] = (df['datetime'] - pd.to_datetime(historique_start)).dt.total_seconds()/86400
     df['annee'] = df['datetime'].dt.year
-    return df[['datetime','puissance_kw_pred','puissance_kw_pred_lower','puissance_kw_pred_upper','jours_depuis_debut','annee']]
+    return df[['datetime','puissance_moy_heure_pred','puissance_moy_heure_pred_lower','puissance_moy_heure_pred_upper','jours_depuis_debut','annee']]
 
 
 

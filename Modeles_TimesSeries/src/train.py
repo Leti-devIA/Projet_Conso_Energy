@@ -33,7 +33,7 @@ from prophet.diagnostics import cross_validation, performance_metrics
 
 
 try:
-    from mlflow_utils import setup_mlflow, log_prophet_training
+    from .mlflow_utils import setup_mlflow, log_prophet_training
     MLFLOW_AVAILABLE = True
 except ImportError:
     MLFLOW_AVAILABLE = False

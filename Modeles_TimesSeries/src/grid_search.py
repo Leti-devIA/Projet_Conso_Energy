@@ -18,8 +18,8 @@ import yaml
 from prophet import Prophet
 from prophet.diagnostics import cross_validation, performance_metrics
 
-from preprocessing import preprocess_pipeline
-from feature_engineering import feature_engineering_pipeline
+from .preprocessing import preprocess_pipeline
+from .feature_engineering import feature_engineering_pipeline
 
 import logging
 
@@ -41,14 +41,14 @@ def save_config(config, config_path="config/config.yaml"):
 
 
 # ---------------- DATA PREPARATION ----------------
-def prepare_data(data_path, config, config_path):
-    """Prépare les données pour Prophet : preprocessing + features."""
+def prepare_data(prm, config, config_path):
+    """Prépare les données pour Prophet : chargement + features."""
     target_col = config["target"]
     regressors = config["prophet"]["regressors"]
 
-    # nettoyage et création de features
-    df_pre  = preprocess_pipeline(str(data_path), from_dataframe=False, config_path=config_path)
-    df_feat = feature_engineering_pipeline(df_pre, config_path=config_path)
+    # Charger et ajouter les features via feature_engineering_pipeline
+    # qui retourne un tuple (df, config)
+    df_feat, _ = feature_engineering_pipeline(prm, config_path=config_path)
 
     df = df_feat.copy()
     df["ds"] = pd.to_datetime(df["datetime"])  # Prophet attend 'ds' pour la date
@@ -72,7 +72,7 @@ def add_logistic_cap_floor(df):
 
 
 # ---------------- MODEL TRAINING ----------------
-def train_with_params(df_train, params, regressors, holidays_df):
+def train_with_params(df_train, params, regressors):
     """Entraîne un modèle Prophet avec des hyperparamètres donnés."""
     df_train = df_train.copy()
     growth = params.get("growth", "linear")
@@ -89,7 +89,6 @@ def train_with_params(df_train, params, regressors, holidays_df):
         seasonality_mode=params.get("seasonality_mode", "additive"),
         changepoint_prior_scale=params.get("changepoint_prior_scale", 0.1),
         seasonality_prior_scale=params.get("seasonality_prior_scale", 10.0),
-        holidays=holidays_df,
         interval_width=params.get("interval_width", 0.95),
         uncertainty_samples=params.get("uncertainty_samples", 1000),
         n_changepoints=params.get("n_changepoints", 25),
@@ -133,14 +132,14 @@ def evaluate_with_cv(model, gs_cfg, metric):
 
 
 # ---------------- PHASE 1 : TREND ----------------
-def tune_trend(df_train, regressors, holidays_df, gs_cfg, metric):
+def tune_trend(df_train, regressors, gs_cfg, metric):
     """Recherche aléatoire des meilleurs paramètres de trend."""
     print("\n================ PHASE 1 : TREND =================")
     trend_grid = {
-        "growth": ["linear", "logistic"],
-        "changepoint_prior_scale": [0.05, 0.1, 0.2],
-        "n_changepoints": [25, 50],
-        "changepoint_range": [0.8, 0.9],
+        "growth": ["flat"],
+        "changepoint_prior_scale": [0.001, 0.01, 0.05, 0.1, 0.5],
+        "n_changepoints": [10, 25, 50],
+        "changepoint_range": [0.8, 0.9, 0.95],
     }
 
     # combinaisons et sous-échantillonnage aléatoire
@@ -153,7 +152,7 @@ def tune_trend(df_train, regressors, holidays_df, gs_cfg, metric):
     for i, combo in enumerate(combos, 1):
         params = dict(zip(trend_grid.keys(), combo))
         print(f"\n[Trend {i}/{len(combos)}] {params}")
-        model = train_with_params(df_train, params, regressors, holidays_df)
+        model = train_with_params(df_train, params, regressors)
         score = evaluate_with_cv(model, gs_cfg, metric)
         print(f"→ {metric} = {score:.4f}")
 
@@ -169,16 +168,16 @@ def tune_trend(df_train, regressors, holidays_df, gs_cfg, metric):
 
 
 # ---------------- PHASE 2 : SAISONNALITÉS ----------------
-def tune_seasonality(df_train, regressors, holidays_df, gs_cfg, metric, base_params):
+def tune_seasonality(df_train, regressors, gs_cfg, metric, base_params):
     """Recherche aléatoire des meilleurs paramètres de saisonnalité."""
     print("\n================ PHASE 2 : SAISONNALITÉS =================")
     season_grid = {
-        "seasonality_mode": ["additive", "multiplicative"],
-        "seasonality_prior_scale": [5, 10, 20, 30],
+        "seasonality_mode": ["multiplicative"],
+        "seasonality_prior_scale": [1, 5, 10, 20, 30],
         "holidays_prior_scale": [5, 10, 20],
-        "daily_fourier_order": [10, 15, 20],
-        "weekly_fourier_order": [5, 8, 10],
-        "yearly_fourier_order": [10, 15, 20],
+        "daily_fourier_order": [5, 10, 15, 20],
+        "weekly_fourier_order": [5, 10, 15, 20],
+        "yearly_fourier_order": [5, 10, 15, 20],
     }
 
     combos = list(itertools.product(*season_grid.values()))
@@ -192,7 +191,7 @@ def tune_seasonality(df_train, regressors, holidays_df, gs_cfg, metric, base_par
         params.update(base_params)  # fusionne avec trend optimisé
 
         print(f"\n[Season {i}/{len(combos)}] {params}")
-        model = train_with_params(df_train, params, regressors, holidays_df)
+        model = train_with_params(df_train, params, regressors)
         score = evaluate_with_cv(model, gs_cfg, metric)
         print(f"→ {metric} = {score:.4f}")
 
@@ -208,7 +207,7 @@ def tune_seasonality(df_train, regressors, holidays_df, gs_cfg, metric, base_par
 
 
 # ---------------- PIPELINE COMPLET ----------------
-def grid_search_random(prm, data_path, config, config_path):
+def grid_search_random(prm, config, config_path):
     """Pipeline complet : prépa données + recherche trend + recherche saisonnalité."""
     gs_cfg     = config.get("grid_search", {})
     metric     = gs_cfg.get("metric", "mape")
@@ -216,16 +215,12 @@ def grid_search_random(prm, data_path, config, config_path):
 
     print(f"\n🔍 OPTIMISATION PRM {prm} | metric = {metric}")
 
-    df = prepare_data(data_path, config, config_path)
+    df = prepare_data(prm, config, config_path)
     split_date = df["ds"].max() - pd.Timedelta(days=30)
     df_train   = df[df["ds"] < split_date]
 
-    from train import create_holidays_dataframe
-    holidays_df = create_holidays_dataframe(df_train["ds"].min(),
-                                            df_train["ds"].max() + timedelta(days=400))
-
-    best_trend = tune_trend(df_train, regressors, holidays_df, gs_cfg, metric)
-    best_all   = tune_seasonality(df_train, regressors, holidays_df, gs_cfg, metric, best_trend)
+    best_trend = tune_trend(df_train, regressors, gs_cfg, metric)
+    best_all   = tune_seasonality(df_train, regressors, gs_cfg, metric, best_trend)
 
     return best_all
 
@@ -246,17 +241,38 @@ def save_best_params(best_params, prm, config, config_path):
 # ---------------- MAIN ----------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--prm", nargs="+")
+    parser.add_argument("--prm", nargs="+", default=None)
     parser.add_argument("--config", default="config/config.yaml")
     args = parser.parse_args()
 
     config = load_config(args.config)
     processed_dir = Path(config["data"]["processed"])
 
-    # repère tous les fichiers preprocessés
-    prm_files = {re.search(r'(\d+)', p.name).group(1): p
-                 for p in processed_dir.glob("data_preprocessed_*.csv")}
+    # Construire un dictionnaire PRM → chemin fichier
+    all_prm_files = {}
+    for p in processed_dir.glob("data_preprocessed_*.csv"):
+        match = re.search(r'(\d+)', p.name)
+        if match:
+            prm = match.group(1)
+            all_prm_files[prm] = p
 
-    for prm, path in prm_files.items():
-        best_params = grid_search_random(prm, path, config, args.config)
+    # Filtrer par PRMs demandés (ou tous si aucun spécifié)
+    prm_files = {}
+    if args.prm:
+        for prm in args.prm:
+            if prm in all_prm_files:
+                prm_files[prm] = all_prm_files[prm]
+            else:
+                print(f"❌ Fichier processed introuvable pour PRM {prm}")
+    else:
+        prm_files = all_prm_files
+
+    if not prm_files:
+        print("❌ Aucun fichier trouvé pour optimisation")
+        exit(1)
+
+    print(f"✅ {len(prm_files)} site(s) à optimiser : {', '.join(prm_files.keys())}\n")
+
+    for prm in prm_files.keys():
+        best_params = grid_search_random(prm, config, args.config)
         save_best_params(best_params, prm, config, args.config)
