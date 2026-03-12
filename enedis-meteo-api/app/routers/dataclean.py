@@ -9,9 +9,13 @@ import traceback
 router = APIRouter()
 
 
-@router.get("/allbyprm")
+@router.get(
+    "/allbyprm",
+    summary="Export CSV des données historiques Enedis + météo par PRM",
+    description="Exporte en format CSV toutes les données pré-nettoyées de Microsoft Fabric pour un Point de Référence Mesure donné."
+)
 async def export_all_by_prm(prm: str = Query(...)):
-    """Export des données pour un PRM donné au format CSV"""
+    """Export des données pré-nettoyées pour un PRM donné au format CSV"""
     print(f"📥 Requête reçue pour PRM: {prm}")
 
     connection = await get_database_connection()
@@ -48,7 +52,11 @@ async def export_all_by_prm(prm: str = Query(...)):
         raise HTTPException(status_code=500, detail=f"Erreur lors de l'export: {str(e)}")
 
 
-@router.get("/previsions-meteo")
+@router.get(
+        "/previsions-meteo",
+        summary="Export CSV de toutes les prévisions météo des 15 prochains jours",
+        description="Exporte en format CSV toutes les prévisions météo disponibles dans la table de Microsoft Fabric pour les 15 prochains jours."
+)
 async def export_previsions_meteo():
     """Export de toutes les prévisions météo au format CSV"""
     print("📥 Requête reçue pour export des prévisions météo")
@@ -87,7 +95,11 @@ async def export_previsions_meteo():
 
 
 
-@router.get("/sites")
+@router.get(
+        "/sites",
+        summary="Export CSV de tous les sites de l'entreprise avec leur PRM associé",
+        description="Exporte en format CSV toutes les sites de l'entreprise disponibles dans la table de Microsoft Fabric."
+)
 async def export_sites():
     """Export de toutes les sites de l'entreprise au format CSV"""
     print("📥 Requête reçue pour export des sites")
@@ -125,7 +137,10 @@ async def export_sites():
         raise HTTPException(status_code=500, detail=f"Erreur lors de l'export: {str(e)}")
 
 
-@router.get("/prixspot")
+@router.get(
+        "/prixspot",
+        summary="Export CSV de tous les prix spot de l'électricité des 3 prochaines années",
+        description="Exporte en format CSV tous les prix spot de l'électricité des 3 prochaines années disponibles dans la table de Microsoft Fabric.")
 async def export_prix_spot():
     """Export de toutes les prix spot au format CSV"""
     print("📥 Requête reçue pour export des prix spot")

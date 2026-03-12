@@ -11,14 +11,14 @@ load_dotenv()
 
 app = FastAPI(
     title="Projet Consommation Energetique - API",
-    description="API pour accéder aux données Enedis et météo nettoyées",
+    description="API pour l'export des données provenant de Microsoft Fabric, incluant les données historiques d'Enedis et les prévisions météo.",
     version="1.0.0"
 )
 
 # Configuration CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -41,8 +41,8 @@ app.include_router(dataclean_router, prefix="/dataclean", tags=["Données nettoy
 
 if __name__ == "__main__":
     uvicorn.run(
-        "app.main:app", 
-        host="0.0.0.0", 
-        port=8000, 
+        "app.main:app",
+        host="0.0.0.0",
+        port=8000,
         reload=True
     )
