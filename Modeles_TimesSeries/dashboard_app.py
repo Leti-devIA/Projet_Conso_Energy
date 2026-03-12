@@ -77,7 +77,7 @@ def load_historical_data() -> pd.DataFrame:
         return pd.DataFrame()
 
     frames = []
-    for filepath in sorted(PROCESSED_DIR.glob("data_preprocessed_*.csv")):
+    for filepath in sorted(PROCESSED_DIR.glob("data_processed_*.csv")):
         df = pd.read_csv(filepath)
         if "datetime" not in df.columns:
             continue
@@ -92,8 +92,8 @@ def load_historical_data() -> pd.DataFrame:
             if prm:
                 df["prm"] = prm
 
-        # puissance_moy_heure est déjà en kW dans les fichiers preprocessed
-        df["puissance_kw"] = df["puissance_moy_heure"]
+        # puissance_moy_heure est déjà en kW dans les fichiers processed
+        df["puissance_kw"] = df["puissance_moy_heure"] /1000
         frames.append(df[["prm", "datetime", "puissance_kw"]])
 
     if not frames:
