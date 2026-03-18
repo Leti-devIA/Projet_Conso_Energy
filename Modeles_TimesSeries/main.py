@@ -1,21 +1,16 @@
 """
-Point d'entrée principal pour entraîner ou prédire avec le modèle Prophet.
+CLI principal du projet (version pédagogique).
 
-Usage:
-    # Entraîner avec un site spécifique
-    python main.py train --prm 30000250086126
+Ce script sert de porte d'entrée unique pour un étudiant :
+1) lister les sites,
+2) entraîner un modèle Prophet,
+3) lancer des prédictions.
 
-    # Entraîner avec tous les sites disponibles
-    python main.py train --all-sites
-
-    # Lister les sites disponibles
+Usage rapide :
     python main.py list-sites
-
-    # Prédiction long terme
-    python main.py predict-longterm --prm 30000250086126 --years 3
-
-    # Générer toutes les prédictions
-    python generate_all_predictions.py
+    python main.py train --prm 30000250086126
+    python main.py train --all-sites
+    python main.py predict --prm 30000250086126 --meteo <fichier_meteo.csv>
 """
 import argparse
 import sys
@@ -130,7 +125,10 @@ def main_train(args):
 
 def main_predict(args):
     """
-    Pipeline de prédiction long terme avec Prophet.
+    Pipeline de prédiction Prophet à partir d'un fichier météo futur.
+
+    Remarque pédagogique :
+    - la qualité de la prédiction dépend directement de la qualité du fichier météo fourni.
     """
     print("\n" + "🔮" * 30)
     print("PIPELINE DE PRÉDICTION PROPHET")
@@ -329,7 +327,7 @@ def main():
                             help='Chemin vers le fichier de configuration')
 
     # Commande PREDICT (court terme avec météo réelle)
-    predict_parser = subparsers.add_parser('predict', help='Prédiction court terme avec Prophet')
+    predict_parser = subparsers.add_parser('predict', help='Prédiction court et long terme avec Prophet')
     predict_parser.add_argument('--prm', type=str, required=True,
                               help='Code PRM du site (ex: 30000540191777)')
     predict_parser.add_argument('--meteo', type=str, required=True,
@@ -341,22 +339,6 @@ def main():
     predict_parser.add_argument('--config', type=str, default='config/config.yaml',
                               help='Chemin vers le fichier de configuration')
 
-    # Commande PREDICT-LONGTERM (long terme avec moyennes climatiques)
-    longterm_parser = subparsers.add_parser('predict-longterm',
-                                          help='Prédiction long terme avec moyennes climatiques')
-    longterm_parser.add_argument('--prm', type=str, required=True,
-                               help='Code PRM du site (ex: 30000540191777)')
-    longterm_parser.add_argument('--years', type=int, default=3,
-                               help='Nombre d\'années à prédire (défaut: 3)')
-    longterm_parser.add_argument('--add-variability', action='store_true', default=True,
-                               help='Ajouter de la variabilité météo réaliste')
-    longterm_parser.add_argument('--output', type=str, default=None,
-                               help='Chemin du fichier de sortie')
-    longterm_parser.add_argument('--model-dir', type=str, default='models/saved',
-                               help='Répertoire des modèles sauvegardés')
-    longterm_parser.add_argument('--config', type=str, default='config/config.yaml',
-                               help='Chemin vers le fichier de configuration')
-
     args = parser.parse_args()
 
     # Exécuter la commande appropriée
@@ -366,8 +348,6 @@ def main():
         main_train(args)
     elif args.command == 'predict':
         main_predict(args)
-    elif args.command == 'predict-longterm':
-        main_predict_longterm(args)
     else:
         parser.print_help()
         sys.exit(1)

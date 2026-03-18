@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from data_loader import get_data_loader
+from src.data_loader import get_data_loader
 
 
 class TestGetDataLoader:

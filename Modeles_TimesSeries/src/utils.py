@@ -1,5 +1,10 @@
 """
-Fonctions utilitaires pour le projet de prédiction énergétique.
+Fonctions utilitaires communes du projet.
+
+Contenu :
+- helpers de configuration et détection des sites,
+- fonctions de métriques,
+- quelques utilitaires historiques (issus d'anciennes expérimentations).
 """
 import re
 import numpy as np
@@ -42,7 +47,7 @@ def build_jour_ferie_index(years):
     return set(fr_holidays.keys())
 
 
-# ===================== Séquences temporelles pour LSTM =====================
+# ===================== Utilitaire historique (séquences) =====================
 def create_sequences(X, y, window):
     """
     Crée des séquences temporelles pour le LSTM.

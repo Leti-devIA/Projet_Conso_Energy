@@ -1,15 +1,10 @@
 """
-GÉNÉRATEUR DE CLIMAT SYNTHÉTIQUE LONG TERME
-===========================================
+Générateur de climat synthétique long terme (support de formation).
 
-Génère un climat futur réaliste statistiquement basé sur :
-1) Climatologie historique saisonnière (mois + heure)
-2) Variabilité météo corrélée dans le temps (persistance AR(1))
-3) Tendance climatique long terme (réchauffement)
-4) Événements extrêmes simulés (canicules) — non superposables
+Ce module crée une météo future "plausible" pour tester les scénarios long terme,
+en combinant climatologie, variabilité, tendance et événements extrêmes simulés.
 
-Ce dataset ≠ prévision météo opérationnelle.
-C'est un "climat synthétique plausible" pour planification long terme.
+Important : ce n'est pas une prévision météo opérationnelle.
 """
 
 import pandas as pd

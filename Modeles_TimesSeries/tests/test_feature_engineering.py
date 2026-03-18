@@ -8,7 +8,7 @@ from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from feature_engineering import (
+from src.feature_engineering import (
     create_temporal_features,
     create_lag_features,
     create_rolling_features,
@@ -90,14 +90,14 @@ class TestCreateRollingFeatures:
     def test_rolling_mean_values(self, sample_dataframe):
         """Test que les rolling means sont corrects."""
         df = pd.DataFrame({
-            "datetime": pd.date_range("2023-01-01", periods=10, freq="H"),
+            "datetime": pd.date_range("2023-01-01", periods=10, freq="h"),  # "H" → "h"
             "puissance_moy_heure": [10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
         })
 
         df_feat = create_rolling_features(df, "puissance_moy_heure")
 
         # Vérifier que les rolling means existent
-        assert "puissance_moy_heure_roll_3" in df_feat.columns
+        assert "puissance_roll_3" in df_feat.columns
 
 
 class TestFeatureEngineering:

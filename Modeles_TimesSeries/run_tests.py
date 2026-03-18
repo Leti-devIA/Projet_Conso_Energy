@@ -1,23 +1,26 @@
 #!/usr/bin/env python
 """
-Script pour exécuter les tests du projet Prophet Energy Forecast.
+Lanceur de tests (version pédagogique).
+
+But : faciliter l'exécution des tests pendant le développement et la soutenance.
 
 Usage:
-    python run_tests.py                    # Tous les tests
-    python run_tests.py --coverage         # Avec rapport de couverture
-    python run_tests.py --fast             # Tests parallèles
-    python run_tests.py --unit             # Uniquement tests unitaires
-    python run_tests.py --specific test_utils.py  # Tests spécifiques
+    python run_tests.py
+    python run_tests.py --coverage
+    python run_tests.py --fast
+    python run_tests.py --unit
+    python run_tests.py --specific test_utils.py
 """
 
 import subprocess
 import sys
 import argparse
 from pathlib import Path
+import pytest
 
 
 def run_command(cmd, description=""):
-    """Exécute une commande shell."""
+    """Exécute une commande shell et retourne le code de sortie."""
     if description:
         print(f"\n{'='*60}")
         print(f"🧪 {description}")

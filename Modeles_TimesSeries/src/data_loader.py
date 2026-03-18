@@ -1,8 +1,10 @@
 """
-Module de chargement des données avec architecture flexible pour CSV et future base de données.
+Module de chargement de données (niveau fondation du projet).
 
-Ce module fournit une interface abstraite pour charger les données depuis différentes sources.
-Il permet de faciliter la migration future depuis CSV vers une base de données.
+Version pédagogique :
+- montre le principe d'une interface abstraite (DataLoader),
+- permet de changer la source des données sans casser le reste du pipeline,
+- simplifie la migration future CSV -> base de données.
 """
 from abc import ABC, abstractmethod
 import pandas as pd

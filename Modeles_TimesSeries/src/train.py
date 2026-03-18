@@ -1,5 +1,5 @@
 """
-Entraînement Prophet multi-sites — un modèle par PRM.
+Étape 3 du pipeline ML : entraînement Prophet multi-sites.
 
 Chaque site produit :
   - models/saved/prophet_model_{PRM}_{timestamp}.pkl
@@ -15,6 +15,9 @@ Utilisation :
 
   # Plusieurs sites
   python src/train.py --prm 30000250086126 30000540191777
+
+Point pédagogique : ce script montre une chaîne complète
+préprocessing -> features -> entraînement -> évaluation -> sauvegarde.
 """
 
 import argparse
@@ -50,6 +53,7 @@ config = load_config("config/config.yaml")
 # ===================================================
 
 def prepare_data_for_prophet(df, target_col, config):
+    """Convertit un DataFrame enrichi en format attendu par Prophet (ds, y + regressors)."""
     df = df.copy()
     df["ds"] = pd.to_datetime(df["datetime"])
     df["y"]  = df[target_col]
@@ -86,6 +90,7 @@ def prepare_data_for_prophet(df, target_col, config):
 # FONCTION DE MÉTRIQUES
 # ============================================================
 def evaluate_model(model, df_val):
+    """Calcule MAE, RMSE, MAPE et R² sur une fenêtre de validation temporelle."""
     df_pred = df_val.copy()
 
     if model.growth == "logistic":
@@ -315,6 +320,12 @@ def train_one_site(data_path, config, prm, config_path):
         print(f"   Val   : {df_val['ds'].min().date()}   → {df_val['ds'].max().date()}   ({len(df_val):,} pts)")
 
         # Vérification données suffisantes
+    # NOTE : train.py évalue sur un unique holdout fixe (derniers N jours).
+    # Le grid search évalue via cross-validation temporelle (plusieurs fenêtres glissantes).
+    # → Les métriques sont légitimement différentes : CV mesure la robustesse
+    #   moyenne dans le temps, le holdout mesure la perf sur la dernière période.
+    # Les hyperparamètres proviennent de site_overrides dans config.yaml,
+    # mis à jour automatiquement après chaque grid search.
         if len(df_train) < 24 * 30:
             print(f"   ⚠️  Données insuffisantes ({len(df_train)} pts < 30 jours) — site ignoré")
             return None, None
@@ -339,10 +350,8 @@ def train_one_site(data_path, config, prm, config_path):
         print(f"   Prophet → MAE={metrics['mae']:.2f} W  RMSE={metrics['rmse']:.2f} W  "
               f"MAPE={metrics['mape']:.1f}%  R²={metrics['r2']:.4f}")
 
-        # Cross-validation (optionnelle, activée dans config.yaml)
-        cv_metrics = run_cross_validation(model, df_train, config, prm)
-        if cv_metrics:
-            metrics.update(cv_metrics)
+        # Protocole aligné avec grid_search.py : pas de cross-validation,
+        # uniquement une évaluation holdout temporelle unique.
 
         # Sauvegarde
         print("\n--- Sauvegarde ---")

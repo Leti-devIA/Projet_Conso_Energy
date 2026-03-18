@@ -1,14 +1,14 @@
 """
-Script pour générer les prévisions météo climatiques pour un ou plusieurs sites.
+Script d'aide pour générer une météo future "climatique".
+
+Pourquoi ce script est utile en formation :
+- il permet d'avoir un fichier météo cohérent pour tester la prédiction long terme,
+- il fonctionne sur 1 site ou tous les sites,
+- il montre un pipeline batch simple.
 
 Usage:
-    # Pour un site spécifique
     python generate_meteo_all.py --prm 30000250086126
-
-    # Pour tous les sites
     python generate_meteo_all.py --all-sites
-
-    # Avec options
     python generate_meteo_all.py --all-sites --nb-annees 5 --no-variability
 """
 import sys
@@ -24,7 +24,7 @@ from generate_climate_averages import generate_climate_averages_pipeline
 
 def generate_meteo_for_site(prm, nb_annees=3, add_variability=True, config_path='config/config.yaml'):
     """
-    Génère les prévisions météo pour un site spécifique.
+    Génère un fichier météo futur pour un site.
 
     Args:
         prm: Code PRM du site
@@ -61,7 +61,7 @@ def generate_meteo_for_site(prm, nb_annees=3, add_variability=True, config_path=
 
 def generate_meteo_all_sites(nb_annees=3, add_variability=True, config_path='config/config.yaml'):
     """
-    Génère les prévisions météo pour tous les sites disponibles.
+    Génère les fichiers météo futurs pour tous les sites disponibles.
 
     Args:
         nb_annees: Nombre d'années à générer

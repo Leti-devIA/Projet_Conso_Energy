@@ -1,5 +1,10 @@
 """
-Utilitaires MLflow pour le tracking des modèles Prophet.
+Utilitaires MLflow pour suivre les expériences Prophet.
+
+Usage pédagogique :
+- conserver l'historique des runs,
+- comparer les métriques entre essais,
+- faciliter l'explication des résultats en soutenance.
 """
 import mlflow
 from pathlib import Path

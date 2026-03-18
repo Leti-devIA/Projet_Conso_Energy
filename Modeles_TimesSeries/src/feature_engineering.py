@@ -1,5 +1,12 @@
 """
-Feature Engineering pour les séries temporelles de consommation énergétique.
+Étape 2 du pipeline ML : feature engineering.
+
+Ce module construit des variables explicatives utiles à Prophet :
+- variables temporelles cycliques,
+- retards (lags),
+- statistiques glissantes,
+- interactions météo,
+- indicateurs calendaires (jours fériés).
 """
 import numpy as np
 import yaml
@@ -115,8 +122,10 @@ def add_logistic_cap_floor(df, config, prm=None, config_path=None):
 # ===================================================
 def feature_engineering_pipeline(prm: str, source="csv", config_path="config/config.yaml"):
     """
-    Pipeline complet pour un site PRM donné.
-    Utilise DataLoader pour charger les données déjà prétraitées.
+    Pipeline complet d'enrichissement pour un site PRM.
+
+    Note pédagogique : cette fonction est centrale car elle transforme
+    un dataset "propre" en dataset "modélisable".
     """
     print("="*60)
     print(f"FEATURE ENGINEERING (PRM: {prm})")

@@ -1,160 +1,167 @@
-# 📊 Prédiction de Consommation Énergétique
+# 📊 Projet de prévision énergétique (Prophet)
 
-Système de prédiction de consommation énergétique basé sur LSTM pour plusieurs sites avec dashboard interactif.
+Projet de fin d’année orienté **apprentissage** : prévoir la consommation électrique horaire de plusieurs sites (PRM) avec **Prophet**, puis visualiser les résultats dans un dashboard Streamlit.
 
-## 🎯 Fonctionnalités
+## 🎓 Pourquoi ce projet (version pédagogique)
 
-- ✅ **Multi-sites** : Gestion simultanée de plusieurs sites (PRM)
-- ✅ **Prédictions long terme** : 3 ans avec moyennes climatiques
-- ✅ **Dashboard interactif** : Visualisation Streamlit
-- ✅ **Architecture modulaire** : Prêt pour base de données
+Ce projet permet de montrer concrètement :
+- la construction d’un pipeline data (chargement → nettoyage → features → modèle),
+- l’évaluation d’un modèle de séries temporelles,
+- l’optimisation d’hyperparamètres (grid search),
+- la production de livrables utilisables (CSV, dashboard, métriques).
 
----
+## 🧱 Architecture du projet
 
-## 🏗️ Architecture
-
-```
+```text
 Modeles_TimesSeries/
-├── main.py                         # CLI principal
-├── config/config.yaml              # Configuration
+├── main.py                     # CLI principal (list-sites / train / predict)
+├── dashboard_app.py            # Dashboard Streamlit
+├── generate_meteo_all.py       # Génération météo long terme (optionnel)
+├── config/config.yaml          # Paramétrage global du pipeline
 ├── data/
-│   ├── raw/
-│   │   ├── sites/                  # dataclean_prm_{PRM}.csv
-│   │   ├── meteo/                  # meteo_moyennes_{ans}ans_{PRM}.csv
-│   │   └── prix/                   # prix_spot.csv
-│   ├── processed/                  # data_preprocessed_{PRM}.csv
-│   └── predictions/                # predictions_longterm_{ans}ans_{PRM}.csv
-├── models/saved/                   # lstm_energy_forecast_latest_{PRM}.h5
-├── src/
-│   ├── data_loader.py              # Chargement données
-│   ├── preprocessing.py            # Nettoyage
-│   ├── feature_engineering.py      # Features (lags, rolling)
-│   ├── model.py                    # LSTM
-│   ├── train.py                    # Entraînement
-│   ├── predict_longterm.py         # Prédictions 3 ans
-│   └── generate_climate_averages.py # Moyennes climat
-├── dashboard_longterm.py           # Dashboard Streamlit
-└── generate_all_predictions.py     # Batch tous sites
+│   ├── raw/                    # Données brutes (sites, météo, prix)
+│   ├── processed/              # Données nettoyées + enrichies
+│   └── predictions/            # Prédictions exportées en CSV
+├── models/saved/               # Modèles entraînés + exports grid search
+├── src/                        # Logique métier
+└── tests/                      # Tests unitaires
 ```
 
----
+## ⚙️ Installation (Windows PowerShell)
 
-## 🚀 Quick Start
-
-### Installation
 ```bash
+python -m venv .venv
+.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-### Lister les sites
+## 🚀 Commandes essentielles
+
+### 1) Lister les sites disponibles
+
 ```bash
 python main.py list-sites
 ```
 
-### Entraîner
-```bash
-# Un site
-python main.py train --prm 30000540191777
+### 2) Entraîner Prophet
 
-# Tous les sites
+Un site :
+
+```bash
+python main.py train --prm 30000250086126
+```
+
+Tous les sites :
+
+```bash
 python main.py train --all-sites
 ```
 
-### Prédictions 3 ans
+### 3) Prédire avec un fichier météo futur
+
 ```bash
-# Un site
-python main.py predict-longterm --prm 30000540191777 --years 3
-
-# Tous les sites
-python generate_all_predictions.py
+python main.py predict --prm 30000250086126 --meteo data/raw/meteo/meteo_horaire_30000250086126.csv
 ```
 
-### Dashboard
+### 4) Optimiser les hyperparamètres (grid search)
+
+Un site :
+
 ```bash
-streamlit run dashboard_longterm.py
+python -m src.grid_search --prm 30000250086126 --config config/config.yaml
 ```
 
----
+Tous les sites :
 
-## 📋 Commandes Principales
-
-| Commande | Description |
-|----------|-------------|
-| `python main.py list-sites` | Liste sites disponibles |
-| `python main.py train --prm XXXXX` | Entraîne un site |
-| `python main.py predict-longterm --prm XXXXX --years 3` | Prédictions 3 ans |
-| `python generate_all_predictions.py` | Batch tous sites |
-| `streamlit run dashboard_longterm.py` | Lance dashboard |
-
----
-
-## 📊 Pipeline
-
-```
-DONNÉES → PREPROCESSING → FEATURE ENGINEERING → ENTRAÎNEMENT → PRÉDICTIONS → DASHBOARD
+```bash
+python -m src.grid_search --config config/config.yaml
 ```
 
-1. **Données brutes** : `data/raw/sites/dataclean_prm_{PRM}.csv`
-2. **Preprocessing** : Nettoyage + normalisation
-3. **Features** : Lags (1-48h), rolling means, features temporelles
-4. **Entraînement** : LSTM → `models/saved/lstm_energy_forecast_latest_{PRM}.h5`
-5. **Prédictions** : 3 ans avec moyennes climatiques
-6. **Visualisation** : Dashboard Streamlit
+### 5) Dashboard
 
----
-
-## 🔧 Modèle LSTM
-
-### Architecture
-- **Input** : 48h × 13 features
-- **LSTM** : 2 couches (128 → 64 units)
-- **Dropout** : 0.2
-- **Output** : Prédiction 1h
-
-### Features
-- **Temporelles** : heure, jour, mois, weekend
-- **Historiques** : lags, rolling means
-- **Météo** : température, humidité
-- **Interactions** : température × heure
-
----
-
-## 📁 Fichiers Par Site
-
-Pour le PRM `30000540191777` :
-
-```
-data/processed/
-  └── data_preprocessed_30000540191777.csv
-data/raw/meteo/
-  └── meteo_moyennes_3ans_30000540191777.csv
-models/saved/
-  ├── lstm_energy_forecast_latest_30000540191777.h5
-  ├── scalers_latest_30000540191777.pkl
-  └── config_latest_30000540191777.json
-data/predictions/
-  ├── predictions_longterm_3ans_30000540191777.csv
-  └── predictions_longterm_3ans_30000540191777_stats.txt
+```bash
+streamlit run dashboard_app.py
 ```
 
+## 🌦️ Cas long terme (important)
+
+Le CLI `main.py` expose aujourd’hui `predict` (pas `predict-longterm`).
+
+Pour un scénario long terme :
+1. Générer une météo climatique synthétique (optionnel) :
+
+```bash
+python generate_meteo_all.py --prm 30000250086126 --nb-annees 3
+```
+
+2. Lancer ensuite `predict` avec le CSV météo produit.
+
+## 🧪 Métriques de performance
+
+Le projet suit :
+- **MAE** : erreur moyenne absolue,
+- **RMSE** : sensible aux grosses erreurs,
+- **MAPE** : erreur relative moyenne,
+- **WAPE** : erreur relative globale pondérée,
+- **R²** : part de variance expliquée.
+
+Exemple de config multi-métriques pour le grid search :
+
+```yaml
+grid_search:
+  metric:
+    - rmse
+    - wape
+```
+
+Le tri se fait d’abord sur `rmse`, puis `wape` sert de départage.
+
+## 📁 Livrables générés
+
+### Entraînement
+- `models/saved/prophet_model_{PRM}_{timestamp}.pkl`
+- `models/saved/prophet_model_{PRM}_latest.pkl`
+- `models/saved/prophet_metrics_{PRM}.json`
+
+### Grid search
+- `models/saved/prophet_best_params_{PRM}.json`
+- `models/saved/grid_search_summary_YYYYMMDD_HHMMSS.csv` (meilleur essai/site)
+- `models/saved/grid_search_trials_YYYYMMDD_HHMMSS.csv` (tous les essais)
+
+### Prédictions
+- `data/predictions/*.csv`
+
+## 🔍 Pipeline (vue simple)
+
+1. Charger les données (`src/data_loader.py`)
+2. Nettoyer / agréger (`src/preprocessing.py`)
+3. Créer les variables explicatives (`src/feature_engineering.py`)
+4. Entraîner Prophet (`src/train.py`)
+5. Évaluer les métriques
+6. Sauvegarder modèle et résultats
+7. Produire des prédictions (`src/predict.py`)
+8. Visualiser (`dashboard_app.py`)
+
+## ✅ Tests
+
+```bash
+python run_tests.py
+```
+
+ou
+
+```bash
+pytest -q
+```
+
+## 🧑‍🏫 Conseils pour ta présentation de fin d’année
+
+- Explique la logique du pipeline étape par étape avec un schéma simple.
+- Montre un exemple de PRM : données d’entrée → modèle → CSV de sortie → dashboard.
+- Justifie le choix de Prophet (interprétable, rapide, robuste en projet pédagogique).
+- Commente au moins 2 limites (qualité météo, dérive, données manquantes).
+- Présente une amélioration future (ex: meilleure validation temporelle, enrichissement prix/activité).
+
 ---
 
-## 📖 Documentation
-
-- **[DASHBOARD_GUIDE.md](DASHBOARD_GUIDE.md)** - Guide dashboard
-- **[WORKFLOW_MULTI_SITES.md](WORKFLOW_MULTI_SITES.md)** - Workflow multi-sites
-- **[DATA_ARCHITECTURE.md](DATA_ARCHITECTURE.md)** - Architecture données
-
----
-
-## ⚠️ Notes
-
-- **Prédictions long terme** : Basées sur moyennes climatiques (indicatives)
-- **Fenêtre minimum** : 48h d'historique requis
-- **Fichiers PRM** : Tous incluent le PRM pour traçabilité
-- **Dashboard** : Détecte automatiquement tous les sites
-
----
-
-**Version** : 2.0 - Multi-Sites
-**Mise à jour** : Février 2026
+**Version** : 3.1 (Prophet-only, pédagogique)

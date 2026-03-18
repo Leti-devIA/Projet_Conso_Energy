@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from utils import load_config, detect_prms
+from src.utils import load_config, detect_prms
 
 
 class TestLoadConfig:
@@ -42,13 +42,13 @@ class TestDetectPrms:
         prms = detect_prms(str(data_dir / "processed"))
         assert isinstance(prms, list) or len(prms) == 0
 
-    def test_detect_prms_with_sample_files(self, data_dir):
+    def test_detect_prms_with_sample_files(self, tmp_path):
         """Test la détection de PRMs avec des fichiers d'exemple."""
-        # Créer des fichiers de test
-        (data_dir / "processed" / "data_preprocessed_30000250086126.csv").touch()
-        (data_dir / "processed" / "data_preprocessed_30000540191777.csv").touch()
+        # Créer un faux fichier CSV
+        (tmp_path / "dataclean_prm_12345.csv").touch()
 
-        prms = detect_prms(str(data_dir / "processed"))
+        prms = detect_prms(tmp_path)
 
-        assert isinstance(prms, (list, set))
-        assert "30000250086126" in prms or len(prms) > 0
+        assert isinstance(prms, dict)           # ← dict {prm: Path}
+        assert "12345" in prms                  # ← clé = numéro PRM
+        assert prms["12345"].name == "dataclean_prm_12345.csv"

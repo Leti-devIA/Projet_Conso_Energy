@@ -1,5 +1,10 @@
 """
-Preprocessing des données brutes de consommation énergétique.
+Étape 1 du pipeline ML : preprocessing.
+
+Objectif pédagogique :
+- transformer les données brutes en données propres et cohérentes,
+- garantir un pas horaire régulier,
+- préparer les colonnes nécessaires au feature engineering.
 """
 import pandas as pd
 import holidays
@@ -78,6 +83,7 @@ def add_jour_ferie(df):
 
 
 def clean_data(df):
+    """Nettoie les données (tri, doublons, jours fériés, contrôle des NaN)."""
     df = df.copy()
     df['datetime'] = pd.to_datetime(df['datetime'])
     df = df.sort_values('datetime').reset_index(drop=True)

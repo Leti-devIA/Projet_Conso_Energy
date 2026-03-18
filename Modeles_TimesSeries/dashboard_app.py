@@ -1,3 +1,12 @@
+"""
+Dashboard Streamlit du projet Prophet (version pédagogique).
+
+Objectif : permettre à un étudiant de visualiser simplement :
+- l'historique et les prévisions,
+- la qualité du modèle (métriques MLflow),
+- un scénario de coût énergie (base/peak).
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -9,6 +18,7 @@ import plotly.express as px
 import streamlit as st
 
 
+# ── Chemins projet ─────────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 PRED_DIR = DATA_DIR / "predictions"
@@ -165,27 +175,43 @@ def build_consumption_pie(df: pd.DataFrame) -> px.pie:
     )
 
 
-def build_consumption_curve(df: pd.DataFrame) -> px.line:
-    # puissance_kw est déjà normalisée à la source pour les deux types
+
+
+def build_consumption_curve(df: pd.DataFrame, aggregate: bool = False) -> px.line:
+    """Courbes de consommation.
+
+    Si *aggregate* est True, on additionne toutes les données par datetime
+    (et par data_type si la colonne existe) pour obtenir un total multi-sites.
+    """
     plot_df = df.copy()
 
-    # Créer une colonne combinée pour différencier par couleur
-    if "data_type" in plot_df.columns:
-        plot_df["legend"] = plot_df["site_label"] + " - " + plot_df["data_type"]
+    if aggregate:
+        group_cols = ["datetime", "data_type"] if "data_type" in plot_df.columns else ["datetime"]
+        plot_df = plot_df.groupby(group_cols, as_index=False)["puissance_kw"].sum()
+        if "data_type" in plot_df.columns:
+            plot_df["legend"] = "Total - " + plot_df["data_type"]
+        else:
+            plot_df["legend"] = "Total"
+        title = "Courbes de consommation totale — tous sites (kW)"
     else:
-        plot_df["legend"] = plot_df["site_label"]
+        if "data_type" in plot_df.columns:
+            plot_df["legend"] = plot_df["site_label"] + " - " + plot_df["data_type"]
+        else:
+            plot_df["legend"] = plot_df["site_label"]
+        title = "Courbes de consommation (kW)"
 
     fig = px.line(
         plot_df,
         x="datetime",
         y="puissance_kw",
         color="legend",
-        title="Courbes de consommation (kW)",
-        labels={"puissance_kw": "Puissance (kW)", "datetime": "Date", "legend": "Site"},
+        title=title,
+        labels={"puissance_kw": "Puissance (kW)", "datetime": "Date", "legend": "Série"},
     )
-    height = max(400, 300 + len(df) * 0.01)
+    height = max(400, 300 + len(plot_df) * 0.01)
     fig.update_layout(height=min(height, 800))
     return fig
+
 
 
 def build_yearly_consumption_histogram(df: pd.DataFrame) -> px.bar:
@@ -249,6 +275,42 @@ def build_price_curve(df: pd.DataFrame, price_col: str, title: str, y_range: lis
     if y_range:
         fig.update_yaxes(range=y_range)
     return fig
+
+
+MLRUNS_DIR = BASE_DIR / "mlruns"
+
+
+@st.cache_data
+def load_mlflow_metrics(prm: str) -> dict | None:
+    """Cherche dans mlruns le run correspondant au PRM et retourne ses métriques."""
+    metric_names = ["val_mae", "val_rmse", "val_mape", "val_r2"]
+
+    for exp_dir in MLRUNS_DIR.iterdir():
+        if not exp_dir.is_dir() or exp_dir.name in (".trash", "models"):
+            continue
+        for run_dir in exp_dir.iterdir():
+            if not run_dir.is_dir():
+                continue
+            prm_file = run_dir / "params" / "site_prm"
+            if not prm_file.exists():
+                continue
+            stored_prm = prm_file.read_text().strip()
+            if stored_prm != prm:
+                continue
+            # Run trouvé — lire les métriques
+            metrics: dict = {}
+            for metric in metric_names:
+                mf = run_dir / "metrics" / metric
+                if mf.exists():
+                    try:
+                        # Format MLflow : "timestamp value step"
+                        last_line = mf.read_text().strip().splitlines()[-1]
+                        metrics[metric] = float(last_line.split()[1])
+                    except (IndexError, ValueError):
+                        pass
+            if metrics:
+                return metrics
+    return None
 
 
 # ── Application ───────────────────────────────────────────────────────────────
@@ -332,11 +394,61 @@ if filtered.empty:
     st.stop()
 
 
-st.subheader("Consommation par site")
-st.plotly_chart(build_consumption_pie(filtered), use_container_width=True)
+multi_site = len(selected_sites) > 1
+
+if multi_site:
+    st.subheader("Répartition de la consommation par site")
+    st.plotly_chart(build_consumption_pie(filtered), use_container_width=True)
+elif len(selected_sites) == 1:
+    # Un seul site : afficher les métriques du modèle
+    st.subheader("Qualité du modèle")
+    single_prm = preds_df.loc[preds_df["site_label"] == selected_sites[0], "prm"].iloc[0]
+    mlflow_metrics = load_mlflow_metrics(single_prm)
+
+    if mlflow_metrics:
+        m_cols = st.columns(4)
+        mae  = mlflow_metrics.get("val_mae")
+        rmse = mlflow_metrics.get("val_rmse")
+        mape = mlflow_metrics.get("val_mape")
+        r2   = mlflow_metrics.get("val_r2")
+
+        m_cols[0].metric(
+            label="MAE (W)",
+            value=f"{mae:,.0f}" if mae is not None else "N/A",
+            help="Mean Absolute Error — erreur absolue moyenne entre la prévision et la consommation réelle. Plus la valeur est basse, meilleur est le modèle.",
+        )
+        m_cols[1].metric(
+            label="RMSE (W)",
+            value=f"{rmse:,.0f}" if rmse is not None else "N/A",
+            help="Root Mean Squared Error — pénalise davantage les grandes erreurs. Comparer au MAE : si RMSE >> MAE, il y a des pics d'erreur importants.",
+        )
+        m_cols[2].metric(
+            label="MAPE (%)",
+            value=f"{mape:.1f} %" if mape is not None else "N/A",
+            help="Mean Absolute Percentage Error — erreur relative moyenne en %. Une valeur < 20 % est généralement considérée comme bonne pour la prévision énergétique.",
+        )
+        m_cols[3].metric(
+            label="R²",
+            value=f"{r2:.3f}" if r2 is not None else "N/A",
+            help="Coefficient de détermination — mesure la part de la variance expliquée par le modèle. 1.0 = parfait, > 0.8 = bon, < 0.5 = à améliorer.",
+        )
+
+        with st.expander("ℹ️ Comment interpréter ces métriques ?"):
+            st.markdown(
+                """
+| Métrique | Description | Idéal |
+|---|---|---|
+| **MAE** | Erreur absolue moyenne (en Watts). Représente l'écart typique entre la prédiction et la réalité. | La plus basse possible |
+| **RMSE** | Erreur quadratique moyenne (en Watts). Amplifie les grandes erreurs : utile pour détecter des pics de mauvaise prédiction. | La plus basse possible |
+| **MAPE** | Erreur relative moyenne (en %). Indépendante de l'échelle ; facilement interprétable. | < 20 %  |
+| **R²** | Part de la variance de la consommation expliquée par le modèle. 1 = parfait. | > 0,80 |
+                """
+            )
+    else:
+        st.info("Aucune métrique MLflow trouvée pour ce site.")
 
 st.subheader("Consommation dans le temps")
-st.plotly_chart(build_consumption_curve(filtered), use_container_width=True)
+st.plotly_chart(build_consumption_curve(filtered, aggregate=multi_site), use_container_width=True)
 
 if not filtered.empty:
     st.plotly_chart(build_yearly_consumption_histogram(filtered), use_container_width=True)

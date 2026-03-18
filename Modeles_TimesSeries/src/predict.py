@@ -1,5 +1,10 @@
 """
-Prédiction Prophet long terme (1-3 ans)
+Étape 4 du pipeline ML : prédiction avec un modèle Prophet entraîné.
+
+Ce module :
+- charge le modèle sauvegardé,
+- construit le DataFrame futur à partir de la météo,
+- produit un CSV de prévision exploitable dans le dashboard.
 """
 
 import pandas as pd
@@ -118,7 +123,7 @@ def build_future_from_features(df_features, meteo_future_df, model):
 # ============================================================
 def predict_future(prm, meteo_future_df, model_dir="models/saved", config_path="config/config.yaml"):
     """
-    Prédit sur un horizon long terme pour un PRM donné
+    Lance la prédiction pour un PRM à partir d'un DataFrame météo futur.
     """
     print(f"\n🔮 PRÉDICTION PROPHET LONG TERME — PRM {prm}")
 
@@ -188,7 +193,7 @@ if __name__ == "__main__":
 
     # Mode PRM : résolution automatique des chemins
     if args.prm:
-        args.historique = args.historique or f"data/processed/data_preprocessed_{args.prm}.csv"
+        args.historique = args.historique or f"data/processed/data_processed_{args.prm}.csv"
         args.meteo      = args.meteo      or f"data/raw/meteo/meteo_horaire_{args.prm}.csv"
         args.output     = args.output     or f"data/predictions/prophet_predictions_{args.prm}.csv"
 

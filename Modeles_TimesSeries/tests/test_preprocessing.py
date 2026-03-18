@@ -8,7 +8,7 @@ from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from preprocessing import clean_data, add_jour_ferie, aggregate_by_hour
+from src.preprocessing import clean_data, add_jour_ferie, aggregate_by_hour
 
 
 class TestCleanData:
@@ -26,7 +26,7 @@ class TestCleanData:
     def test_clean_data_removes_duplicates(self):
         """Test que clean_data supprime les doublons."""
         df = pd.DataFrame({
-            "datetime": pd.date_range("2023-01-01", periods=5, freq="H"),
+            "datetime": pd.date_range("2023-01-01", periods=5, freq="h"),  # "H" → "h"
             "puissance_moy_heure": [100, 200, 100, 200, 150],
         })
         # Ajouter des doublons

@@ -10,6 +10,9 @@ import sys
 # Ajouter src au path pour les imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+# Exclure les patterns avancés du run par défaut (fichier pédagogique)
+collect_ignore = ["test_patterns_advanced.py"]
+
 
 @pytest.fixture
 def sample_dates():
@@ -24,7 +27,7 @@ def sample_dataframe(sample_dates):
     """Crée un DataFrame de test avec données de consommation."""
     np.random.seed(42)
     df = pd.DataFrame({
-        "datetime": pd.date_range(start=datetime(2023, 1, 1), periods=100, freq="H"),
+        "datetime": pd.date_range(start=datetime(2023, 1, 1), periods=100, freq="h"),  # "H" → "h"
         "puissance_moy_heure": np.random.uniform(100, 500, 100),
         "temperature": np.random.uniform(-5, 30, 100),
         "humidite": np.random.uniform(30, 90, 100),
