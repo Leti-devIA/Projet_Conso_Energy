@@ -67,9 +67,7 @@ Modeles_TimesSeries/sample_prediction.json
 # =========================
 # Données (CSV, txt, etc.)
 # =========================
-# API exports
-enedis-meteo-api/exports/
-enedis-meteo-api/exports/**/*.csv
+*.csv
 
 # Données brutes / transformées / prédictions
 Modeles_TimesSeries/data/raw/
@@ -153,12 +151,6 @@ Modeles_TimesSeries/scalers_production.pkl
 Modeles_TimesSeries/config_production.json
 Modeles_TimesSeries/sample_prediction.json
 
-# =========================
-# Données (CSV, txt, etc.)
-# =========================
-# API exports
-enedis-meteo-api/exports/
-enedis-meteo-api/exports/**/*.csv
 
 # Données brutes / transformées / prédictions
 Modeles_TimesSeries/data/

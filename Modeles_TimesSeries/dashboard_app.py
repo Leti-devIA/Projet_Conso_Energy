@@ -10,7 +10,10 @@ Objectif : permettre à un étudiant de visualiser simplement :
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
+import hmac
 import re
+import sqlite3
 
 import numpy as np
 import pandas as pd
@@ -25,6 +28,7 @@ PRED_DIR = DATA_DIR / "predictions"
 PROCESSED_DIR = DATA_DIR / "processed"
 SITES_FILE = DATA_DIR / "raw" / "sites" / "table_sites.csv"
 PRICE_FILE = DATA_DIR / "raw" / "prix" / "prix_spot.csv"
+USERS_DB_FILE = BASE_DIR / "users.db"
 
 # ── Constantes de conversion ──────────────────────────────────────────────────
 W_TO_KWH = 1 / 1_000          # W (sur 1 h) → kWh
@@ -280,6 +284,84 @@ def build_price_curve(df: pd.DataFrame, price_col: str, title: str, y_range: lis
 MLRUNS_DIR = BASE_DIR / "mlruns"
 
 
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
+def init_users_db() -> None:
+    with sqlite3.connect(USERS_DB_FILE) as connection:
+        cursor = connection.cursor()
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL CHECK(role IN ('admin', 'lecteur')),
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+        default_users = [
+            ("admin", hash_password("admin123"), "admin"),
+            ("lecteur", hash_password("lecteur123"), "lecteur"),
+        ]
+        cursor.executemany(
+            """
+            INSERT OR IGNORE INTO users(username, password_hash, role)
+            VALUES (?, ?, ?)
+            """,
+            default_users,
+        )
+        connection.commit()
+
+
+def authenticate_user(username: str, password: str) -> dict | None:
+    with sqlite3.connect(USERS_DB_FILE) as connection:
+        cursor = connection.cursor()
+        cursor.execute(
+            "SELECT username, password_hash, role FROM users WHERE username = ?",
+            (username,),
+        )
+        row = cursor.fetchone()
+
+    if not row:
+        return None
+
+    stored_username, stored_hash, role = row
+    if not hmac.compare_digest(stored_hash, hash_password(password)):
+        return None
+
+    return {"username": stored_username, "role": role}
+
+
+def create_user(username: str, password: str, role: str) -> tuple[bool, str]:
+    username = username.strip()
+    if not username:
+        return False, "Le nom d'utilisateur est obligatoire."
+    if len(password) < 6:
+        return False, "Le mot de passe doit contenir au moins 6 caractères."
+    if role not in {"admin", "lecteur"}:
+        return False, "Role invalide."
+
+    try:
+        with sqlite3.connect(USERS_DB_FILE) as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                INSERT INTO users(username, password_hash, role)
+                VALUES (?, ?, ?)
+                """,
+                (username, hash_password(password), role),
+            )
+            connection.commit()
+    except sqlite3.IntegrityError:
+        return False, "Ce nom d'utilisateur existe déjà."
+
+    return True, "Utilisateur créé avec succès."
+
+
 @st.cache_data
 def load_mlflow_metrics(prm: str) -> dict | None:
     """Cherche dans mlruns le run correspondant au PRM et retourne ses métriques."""
@@ -320,6 +402,62 @@ st.set_page_config(
     page_title="Conso Energ Dashboard",
 )
 
+init_users_db()
+
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+if "username" not in st.session_state:
+    st.session_state.username = ""
+if "role" not in st.session_state:
+    st.session_state.role = ""
+
+if not st.session_state.authenticated:
+    st.title("Identification")
+    st.caption("Connectez-vous pour accéder au dashboard")
+    st.info("Comptes de test : admin/admin123 et lecteur/lecteur123")
+
+    with st.form("login_form", clear_on_submit=False):
+        username_input = st.text_input("Nom d'utilisateur")
+        password_input = st.text_input("Mot de passe", type="password")
+        submitted = st.form_submit_button("Se connecter")
+
+    if submitted:
+        user = authenticate_user(username_input.strip(), password_input)
+        if user:
+            st.session_state.authenticated = True
+            st.session_state.username = user["username"]
+            st.session_state.role = user["role"]
+            st.rerun()
+        else:
+            st.error("Identifiants invalides")
+
+    st.stop()
+
+current_username = st.session_state.username
+current_role = st.session_state.role
+
+st.sidebar.success(f"Connecté : {current_username} ({current_role})")
+if st.sidebar.button("Se déconnecter"):
+    st.session_state.authenticated = False
+    st.session_state.username = ""
+    st.session_state.role = ""
+    st.rerun()
+
+if current_role == "admin":
+    with st.sidebar.expander("Gestion des utilisateurs", expanded=False):
+        with st.form("create_user_form", clear_on_submit=True):
+            new_username = st.text_input("Nouveau nom d'utilisateur")
+            new_password = st.text_input("Nouveau mot de passe", type="password")
+            new_role = st.selectbox("Role", ["admin", "lecteur"])
+            create_submitted = st.form_submit_button("Créer l'utilisateur")
+
+        if create_submitted:
+            created, message = create_user(new_username, new_password, new_role)
+            if created:
+                st.success(message)
+            else:
+                st.error(message)
+
 st.title("Dashboard previsions conso et prix")
 
 sites_df = load_sites()
@@ -356,7 +494,19 @@ max_date_pred = preds_df["datetime"].max()
 
 st.sidebar.header("Filtres")
 site_options = sorted(preds_df["site_label"].unique())
-selected_sites = st.sidebar.multiselect("Sites", site_options, default=site_options)
+site_filter_options = ["Tous les sites"] + site_options
+selected_site_filters = st.sidebar.multiselect(
+    "Sites",
+    site_filter_options,
+    default=["Tous les sites"],
+)
+
+if not selected_site_filters or "Tous les sites" in selected_site_filters:
+    selected_sites = site_options
+    all_sites_selected = True
+else:
+    selected_sites = [site for site in selected_site_filters if site in site_options]
+    all_sites_selected = len(selected_sites) == len(site_options)
 
 show_historical = st.sidebar.checkbox("Afficher l'historique", value=False)
 
@@ -493,94 +643,96 @@ else:
 
 st.divider()
 
-st.subheader("Simulation achat base/peak")
+if current_role != "admin":
+    st.info("Mode lecteur : la simulation achat base/peak est réservée aux administrateurs.")
+elif not all_sites_selected:
+    st.info("La simulation est disponible uniquement avec le filtre 'Tous les sites'.")
+else:
+    st.subheader("Simulation achat base/peak")
 
-sim_site = st.selectbox("Site pour la simulation", site_options, index=0)
-
-sim_df = filtered[filtered["site_label"] == sim_site].copy()
-
-if sim_df.empty:
-    st.info("Selectionnez un site avec des donnees de prediction.")
-    st.stop()
-
-with st.expander("Parametres de simulation", expanded=True):
-    base_volume = st.number_input("Volume base achete (kW)", min_value=0.0, value=500.0, step=10.0)
-    peak_volume = st.number_input("Volume peak achete (kW)", min_value=0.0, value=200.0, step=10.0)
-    peak_start = st.slider("Heure debut peak", min_value=0, max_value=23, value=8)
-    peak_end = st.slider("Heure fin peak", min_value=0, max_value=23, value=20)
-    include_weekend = st.checkbox("Inclure weekend en peak", value=False)
-
-    turpe_kwh = st.number_input("TURPE (EUR/kWh)", min_value=0.0, value=0.0, step=0.001, format="%.3f")
-    tax_rate = st.number_input("Taxes (taux, ex: 0.20)", min_value=0.0, value=0.0, step=0.01, format="%.2f")
-
-if prices_df.empty:
-    st.warning("Simulation impossible sans donnees de prix.")
-    st.stop()
-
-priority = ["mensuel", "trimestriel", "annuel"]
-
-sim_df = sim_df.sort_values("datetime").reset_index(drop=True)
-
-sim_df["price_base"] = price_for_datetimes(sim_df["datetime"], prices_df, "prix_base", priority)
-sim_df["price_peak"] = price_for_datetimes(sim_df["datetime"], prices_df, "prix_peak", priority)
-
-sim_df["hour"] = sim_df["datetime"].dt.hour
-sim_df["weekday"] = sim_df["datetime"].dt.weekday
-is_peak = sim_df["hour"].between(peak_start, peak_end)
-if not include_weekend:
-    is_peak = is_peak & (sim_df["weekday"] < 5)
-
-sim_df["is_peak"] = is_peak
-sim_df["purchased_kw"] = base_volume + np.where(sim_df["is_peak"], peak_volume, 0.0)
-
-# Prix en EUR/MWh, conso en kWh (1 kW × 1h = 1 kWh), division par 1000 pour passer kWh→MWh
-sim_df["contract_cost_eur"] = (
-    base_volume * sim_df["price_base"] / 1000.0
-    + np.where(sim_df["is_peak"], peak_volume * sim_df["price_peak"] / 1000.0, 0.0)
-)
-
-sim_df["spot_price"] = np.where(sim_df["is_peak"], sim_df["price_peak"], sim_df["price_base"])
-
-sim_df["spot_cost_eur"] = (
-    (sim_df["puissance_kw"] - sim_df["purchased_kw"]) * sim_df["spot_price"] / 1000.0
-)
-
-sim_df["energy_cost_eur"] = sim_df["contract_cost_eur"] + sim_df["spot_cost_eur"]
-sim_df["turpe_eur"] = sim_df["puissance_kw"] * turpe_kwh
-sim_df["subtotal_eur"] = sim_df["energy_cost_eur"] + sim_df["turpe_eur"]
-sim_df["taxes_eur"] = sim_df["subtotal_eur"] * tax_rate
-sim_df["total_eur"] = sim_df["subtotal_eur"] + sim_df["taxes_eur"]
-
-kpis = st.columns(4)
-
-kpis[0].metric("Conso totale (kWh)", f"{sim_df['puissance_kw'].sum():,.0f}")
-kpis[1].metric("Cout energie (EUR)", f"{sim_df['energy_cost_eur'].sum():,.0f}")
-kpis[2].metric("Cout total (EUR)", f"{sim_df['total_eur'].sum():,.0f}")
-kpis[3].metric("Prix moyen (EUR/MWh)", f"{(sim_df['total_eur'].sum() / (sim_df['puissance_kw'].sum() / 1000.0)):.2f}")
-
-cost_cols = st.columns(2)
-
-with cost_cols[0]:
-    fig_cost = px.line(
-        sim_df,
-        x="datetime",
-        y="total_eur",
-        title="Cout horaire total",
+    sim_df = (
+        filtered.groupby("datetime", as_index=False)["puissance_kw"].sum()
     )
-    # Adapter hauteur en fonction du nombre de points
-    height = max(400, 300 + len(sim_df) * 0.01)
-    fig_cost.update_layout(height=min(height, 800))
-    st.plotly_chart(fig_cost, use_container_width=True)
 
-with cost_cols[1]:
-    sim_df["total_cum_eur"] = sim_df["total_eur"].cumsum()
-    fig_cum = px.line(
-        sim_df,
-        x="datetime",
-        y="total_cum_eur",
-        title="Cout cumule",
+    if sim_df.empty:
+        st.info("Aucune donnée disponible pour la simulation tous sites.")
+        st.stop()
+
+    with st.expander("Parametres de simulation", expanded=True):
+        base_volume = st.number_input("Volume base achete (kW)", min_value=0.0, value=500.0, step=10.0)
+        peak_volume = st.number_input("Volume peak achete (kW)", min_value=0.0, value=200.0, step=10.0)
+        peak_start = st.slider("Heure debut peak", min_value=0, max_value=23, value=8)
+        peak_end = st.slider("Heure fin peak", min_value=0, max_value=23, value=20)
+        include_weekend = st.checkbox("Inclure weekend en peak", value=False)
+
+        turpe_kwh = st.number_input("TURPE (EUR/kWh)", min_value=0.0, value=0.0, step=0.001, format="%.3f")
+        tax_rate = st.number_input("Taxes (taux, ex: 0.20)", min_value=0.0, value=0.0, step=0.01, format="%.2f")
+
+    if prices_df.empty:
+        st.warning("Simulation impossible sans donnees de prix.")
+        st.stop()
+
+    priority = ["mensuel", "trimestriel", "annuel"]
+
+    sim_df = sim_df.sort_values("datetime").reset_index(drop=True)
+
+    sim_df["price_base"] = price_for_datetimes(sim_df["datetime"], prices_df, "prix_base", priority)
+    sim_df["price_peak"] = price_for_datetimes(sim_df["datetime"], prices_df, "prix_peak", priority)
+
+    sim_df["hour"] = sim_df["datetime"].dt.hour
+    sim_df["weekday"] = sim_df["datetime"].dt.weekday
+    is_peak = sim_df["hour"].between(peak_start, peak_end)
+    if not include_weekend:
+        is_peak = is_peak & (sim_df["weekday"] < 5)
+
+    sim_df["is_peak"] = is_peak
+    sim_df["purchased_kw"] = base_volume + np.where(sim_df["is_peak"], peak_volume, 0.0)
+
+    sim_df["contract_cost_eur"] = (
+        base_volume * sim_df["price_base"] / 1000.0
+        + np.where(sim_df["is_peak"], peak_volume * sim_df["price_peak"] / 1000.0, 0.0)
     )
-    # Adapter hauteur en fonction du nombre de points
-    height = max(400, 300 + len(sim_df) * 0.01)
-    fig_cum.update_layout(height=min(height, 800))
-    st.plotly_chart(fig_cum, use_container_width=True)
+
+    sim_df["spot_price"] = np.where(sim_df["is_peak"], sim_df["price_peak"], sim_df["price_base"])
+
+    sim_df["spot_cost_eur"] = (
+        (sim_df["puissance_kw"] - sim_df["purchased_kw"]) * sim_df["spot_price"] / 1000.0
+    )
+
+    sim_df["energy_cost_eur"] = sim_df["contract_cost_eur"] + sim_df["spot_cost_eur"]
+    sim_df["turpe_eur"] = sim_df["puissance_kw"] * turpe_kwh
+    sim_df["subtotal_eur"] = sim_df["energy_cost_eur"] + sim_df["turpe_eur"]
+    sim_df["taxes_eur"] = sim_df["subtotal_eur"] * tax_rate
+    sim_df["total_eur"] = sim_df["subtotal_eur"] + sim_df["taxes_eur"]
+
+    kpis = st.columns(4)
+
+    kpis[0].metric("Conso totale (kWh)", f"{sim_df['puissance_kw'].sum():,.0f}")
+    kpis[1].metric("Cout energie (EUR)", f"{sim_df['energy_cost_eur'].sum():,.0f}")
+    kpis[2].metric("Cout total (EUR)", f"{sim_df['total_eur'].sum():,.0f}")
+    kpis[3].metric("Prix moyen (EUR/MWh)", f"{(sim_df['total_eur'].sum() / (sim_df['puissance_kw'].sum() / 1000.0)):.2f}")
+
+    cost_cols = st.columns(2)
+
+    with cost_cols[0]:
+        fig_cost = px.line(
+            sim_df,
+            x="datetime",
+            y="total_eur",
+            title="Cout horaire total",
+        )
+        height = max(400, 300 + len(sim_df) * 0.01)
+        fig_cost.update_layout(height=min(height, 800))
+        st.plotly_chart(fig_cost, use_container_width=True)
+
+    with cost_cols[1]:
+        sim_df["total_cum_eur"] = sim_df["total_eur"].cumsum()
+        fig_cum = px.line(
+            sim_df,
+            x="datetime",
+            y="total_cum_eur",
+            title="Cout cumule",
+        )
+        height = max(400, 300 + len(sim_df) * 0.01)
+        fig_cum.update_layout(height=min(height, 800))
+        st.plotly_chart(fig_cum, use_container_width=True)
