@@ -17,16 +17,19 @@ import sys
 import pickle
 import json
 from pathlib import Path
-from datetime import datetime
+import sys
 
-# Ajouter le répertoire src au path si nécessaire
-sys.path.insert(0, str(Path(__file__).parent / 'src'))
+# S'assure que la racine du projet est dans le path Python
+PROJECT_ROOT = Path(__file__).resolve().parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-from data_loader import get_data_loader
-from train import train_one_site
-from predict import predict_future, load_prophet_model
-from utils import load_config, detect_prms
-from generate_climate_averages import generate_climate_averages_pipeline
+# ✅ Imports package (et non module plat)
+from src.train import train_one_site  # + autres fonctions si besoin
+# ex: from src.train import train_one_site, train_all_sites
+from src.predict import predict_future, load_prophet_model
+from src.utils import load_config, detect_prms
+from src.generate_climate_averages import generate_climate_averages_pipeline
 import pandas as pd
 
 

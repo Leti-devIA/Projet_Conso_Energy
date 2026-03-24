@@ -1,6 +1,6 @@
 # 📊 Projet de prévision énergétique (Prophet)
 
-Projet de fin d’année orienté **apprentissage** : prévoir la consommation électrique horaire de plusieurs sites (PRM) avec **Prophet**, puis visualiser les résultats dans un dashboard Streamlit.
+Projet de fin d’année : prévoir la consommation électrique horaire de plusieurs sites (PRM) avec **Prophet**, puis visualiser les résultats dans un dashboard Streamlit.
 
 ## 🎓 Pourquoi ce projet (version pédagogique)
 
@@ -48,7 +48,7 @@ python main.py list-sites
 Un site :
 
 ```bash
-python main.py train --prm 30000250086126
+python -m src.train --prm 30000650060080
 ```
 
 Tous les sites :
@@ -60,7 +60,7 @@ python main.py train --all-sites
 ### 3) Prédire avec un fichier météo futur
 
 ```bash
-python main.py predict --prm 30000250086126 --meteo data/raw/meteo/meteo_horaire_30000250086126.csv
+python -m src.predict --prm 30000650060080
 ```
 
 ### 4) Optimiser les hyperparamètres (grid search)
@@ -68,13 +68,13 @@ python main.py predict --prm 30000250086126 --meteo data/raw/meteo/meteo_horaire
 Un site :
 
 ```bash
-python -m src.grid_search --prm 30000250086126 --config config/config.yaml
+python -m src.grid_search --prm 30000250086126
 ```
 
 Tous les sites :
 
 ```bash
-python -m src.grid_search --config config/config.yaml
+python -m src.grid_search
 ```
 
 ### 5) Dashboard
@@ -88,10 +88,10 @@ streamlit run dashboard_app.py
 Le CLI `main.py` expose aujourd’hui `predict` (pas `predict-longterm`).
 
 Pour un scénario long terme :
-1. Générer une météo climatique synthétique (optionnel) :
+1. Générer une météo climatique synthétique :
 
 ```bash
-python generate_meteo_all.py --prm 30000250086126 --nb-annees 3
+python generate_climate_averages.py
 ```
 
 2. Lancer ensuite `predict` avec le CSV météo produit.
