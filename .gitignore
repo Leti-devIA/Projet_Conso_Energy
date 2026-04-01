@@ -1,0 +1,184 @@
+# =========================
+# Fichiers système / éditeur
+# =========================
+.vscode/
+.idea/
+*.code-workspace
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# =========================
+# Environnements Python
+# =========================
+env/
+venv/
+.venv/
+env_api/
+ENV/
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.pytest_cache/
+.pytest_cache/
+.mypy_cache/
+coverage/
+htmlcov/
+
+# =========================
+# Configs sensibles
+# =========================
+.env
+.env.*
+!env.example
+!.env.example
+
+# =========================
+# Jupyter / Notebooks
+# =========================
+.ipynb_checkpoints/
+*.ipynb_convert/
+**/.ipynb_checkpoints/
+
+# =========================
+# Logs & TensorBoard
+# =========================
+logs/
+*.log
+events.out.tfevents.*
+mlruns/
+
+# =========================
+# Modèles & artefacts lourds
+# =========================
+# Dossier modèles sauvegardés (on garde les configs .json)
+Modeles_TimesSeries/models/saved/*.h5
+Modeles_TimesSeries/models/saved/*.pkl
+Modeles_TimesSeries/models/saved/*_latest.*
+
+# Artefacts générés par les notebooks
+Modeles_TimesSeries/modele_lstm_production.h5
+Modeles_TimesSeries/scalers_production.pkl
+Modeles_TimesSeries/config_production.json
+Modeles_TimesSeries/sample_prediction.json
+
+# =========================
+# Données (CSV, txt, etc.)
+# =========================
+*.csv
+
+# Données brutes / transformées / prédictions
+Modeles_TimesSeries/data/raw/
+Modeles_TimesSeries/data/processed/
+Modeles_TimesSeries/data/predictions/
+
+# CSV locaux spécifiques
+Modeles_TimesSeries/dataclean_prm_*.csv
+Modeles_TimesSeries/dataFE_prm_*.csv
+
+# =========================
+# Divers
+# =========================
+*.tmp
+*.bak
+*.orig
+*.~*
+```// filepath: c:\Users\36MONNIE-L\Documents\Projet Conso Energ\.gitignore
+# =========================
+# Fichiers système / éditeur
+# =========================
+.vscode/
+.idea/
+*.code-workspace
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# =========================
+# Environnements Python
+# =========================
+env/
+venv/
+.venv/
+env_api/
+ENV/
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.pytest_cache/
+.pytest_cache/
+.mypy_cache/
+coverage/
+htmlcov/
+
+# =========================
+# Configs sensibles
+# =========================
+.env
+.env.*
+!env.example
+!.env.example
+
+# =========================
+# Jupyter / Notebooks
+# =========================
+.ipynb_checkpoints/
+*.ipynb_convert/
+**/.ipynb_checkpoints/
+
+# =========================
+# Logs & TensorBoard
+# =========================
+logs/
+*.log
+events.out.tfevents.*
+
+# =========================
+# Modèles & artefacts lourds
+# =========================
+# Dossier modèles sauvegardés (on garde les configs .json)
+Modeles_TimesSeries/models/saved/*.h5
+Modeles_TimesSeries/models/saved/*.pkl
+Modeles_TimesSeries/models/saved/*_latest.*
+
+# Artefacts générés par les notebooks
+Modeles_TimesSeries/modele_lstm_production.h5
+Modeles_TimesSeries/scalers_production.pkl
+Modeles_TimesSeries/config_production.json
+Modeles_TimesSeries/sample_prediction.json
+
+
+# Données brutes / transformées / prédictions
+Modeles_TimesSeries/data/
+
+# Modeles & artefacts lourds
+Modeles_TimesSeries/models/
+
+
+Scraping_prix/scrap_env/
+Scraping_prix/*.json
+
+database_dataclean/
+
+old/
+
+
+
+# =========================
+# Divers
+# =========================
+*.tmp
+*.bak
+*.orig
+*.~*
+*.csv
+*.png
+*.pdf
+*.loo
+*.lo1
+
+.gitignore

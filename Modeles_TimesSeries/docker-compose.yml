@@ -1,0 +1,115 @@
+services:
+
+  # ───────────────────────────────────────────────────────────
+  # API Dataclean — fournit les données historiques
+  # Port : 8000
+  # ───────────────────────────────────────────────────────────
+  api-dataclean:
+    build:
+      context: ./api/api-dataclean
+      dockerfile: Dockerfile
+    container_name: api-dataclean
+    environment:
+      - DB_SERVER=${DB_SERVER}
+      - DB_DATABASE=${DB_DATABASE}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./api/api-dataclean/.env
+    restart: unless-stopped
+    networks:
+      - conso-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  # ───────────────────────────────────────────────────────────
+  # API Inference — prédictions Prophet + exports Fabric
+  # Port : 8001
+  # Démarre seulement quand api-dataclean est healthy
+  # ───────────────────────────────────────────────────────────
+  api-inference:
+    build:
+      context: .
+      dockerfile: ./api/api-inference/Dockerfile
+    container_name: api-inference
+    ports:
+      - "8001:8001"
+    env_file:
+      - ./api/api-inference/.env
+    environment:
+      # Dans Docker, on appelle le service par son nom (pas 127.0.0.1)
+      - DATACLEAN_BASE_URL=http://api-dataclean:8000
+    depends_on:
+      api-dataclean:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - conso-network
+    volumes:
+      # Code API monté en live (évite rebuild complet à chaque correctif)
+      - ./api/api-inference/app:/app/app
+      # Modèles entraînés (lecture/écriture pour pouvoir en rajouter)
+      - ./models/saved:/app/models/saved
+      # MLflow runs (pour les métriques)
+      - ./api/api-inference/mlruns:/app/mlruns
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ───────────────────────────────────────────────────────────
+  # Tunnel ngrok — expose api-inference sur internet
+  # Seulement activé avec :  docker compose --profile local up
+  # Port 4040 : interface web ngrok (voir les requêtes en live)
+  # ───────────────────────────────────────────────────────────
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: ngrok-tunnel
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    command: http api-inference:8001 --log=stdout
+    ports:
+      - "4040:4040"
+    depends_on:
+      api-inference:
+        condition: service_healthy
+    networks:
+      - conso-network
+    profiles:
+      - local   # docker compose --profile local up
+
+  # ───────────────────────────────────────────────────────────
+  # Sync config ngrok -> Fabric runtime (one-shot)
+  # Génère automatiquement config/fabric_runtime.env
+  # ───────────────────────────────────────────────────────────
+  ngrok-config-sync:
+    image: python:3.11-slim
+    container_name: ngrok-config-sync
+    working_dir: /workspace
+    command: ["python", "scripts/sync_ngrok_to_fabric_config.py"]
+    environment:
+      - NGROK_API_URL=http://ngrok:4040/api/tunnels
+      - SYNC_OUTPUT_ENV=/workspace/config/fabric_runtime.env
+      - SYNC_MAX_WAIT_SECONDS=90
+      - SYNC_POLL_INTERVAL_SECONDS=2
+    volumes:
+      - ./:/workspace
+    depends_on:
+      - ngrok
+    networks:
+      - conso-network
+    restart: "no"
+    profiles:
+      - local
+
+# ─── Réseau interne partagé ────────────────────────────────
+networks:
+  conso-network:
+    driver: bridge
