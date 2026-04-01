@@ -1,321 +1,295 @@
-# 📈 API Inference - Projet Conso Energ
 
-API REST FastAPI qui sert de pont entre :
-- l'API de données nettoyées (`api-dataclean`),
-- les modèles Prophet entraînés (`models/saved`),
-- le dashboard (consommation des prédictions).
+# API Inference
 
-## 🚀 Fonctionnalités
+L'API Inference sert de **pont applicatif** entre :
 
-- Synchronisation des historiques par PRM depuis `GET /dataclean/allbyprm?prm=...`
-- Sauvegarde automatique des historiques dans `data/raw/sites`
-- Lancement d'une prédiction Prophet pour un PRM (historique récupéré directement via API dataclean en JSON)
-- Retour JSON direct pour le dashboard (sans CSV de sortie)
-- Exposition du dernier résultat depuis un cache mémoire API
-- Documentation OpenAPI native (`/docs`)
+1. les données historiques fournies par `api-dataclean`,
+2. les modèles Prophet entraînés,
+3. les consommateurs métier (dashboard, scripts, automatisations Fabric).
 
-## 🏗️ Architecture (flux simplifié)
+Elle permet de synchroniser les historiques, lancer des prédictions et exposer les résultats sous forme d'endpoints REST.
 
-1. Dashboard → `POST /predict/prm/{prm}`
-2. API Inference → `api-dataclean/dataclean/allbyprm-json?prm=...`
-3. API Inference → génération météo + modèle Prophet (en mémoire)
-4. API Inference → réponse JSON immédiate de la prédiction
-5. (Optionnel) Dashboard → `GET /predictions/prm/{prm}/latest` pour relire le dernier résultat en mémoire
+---
 
-> `POST /sync/prm/{prm}` reste disponible si tu veux conserver une copie locale CSV pour debug/audit.
+## 1) Objectif
 
-## 🔐 Authentification
+Pour un étudiant data/IA, cette API montre un cas concret de mise en production :
 
-Toutes les routes métier sont protégées par une clé API via header HTTP :
+- appel API → pipeline ML → réponse JSON,
+- séparation claire entre ingestion de données (`api-dataclean`) et inférence (`api-inference`),
+- gestion d'authentification simple via clé API,
+- intégration avec Fabric/MLflow.
 
-- Header : `X-API-Key`
-- Variable d'environnement : `INFERENCE_API_KEY`
+---
 
-Route non protégée : `GET /health`
+## 2) Fonctionnalités principales
 
-Exemple `.env` :
+- **Health check** de l'API (`/health`)
+- **Synchronisation** d'un historique PRM depuis `api-dataclean` vers `data/raw/sites`
+- **Prédiction Prophet** par PRM (`POST /predict/prm/{prm}`)
+- **Lecture de la dernière prédiction** depuis Fabric (`GET /predictions/prm/{prm}/latest`)
+- **Listing des modèles disponibles** (`GET /models/list`)
+- **Routes modèles avancées** (registre/modèle actif/push vers Fabric selon configuration)
+
+---
+
+## 3) Structure du projet
+
+```
+api-inference/
+│
+├── app/
+│   ├── main.py                    # Entrée FastAPI, CORS, routers
+│   ├── settings.py                # Variables d'environnement et chemins
+│   ├── security.py                # Vérification X-API-Key
+│   ├── logging_utils.py           # Logs + corrélation de requêtes
+│   ├── project_paths.py           # Résolution de la racine projet
+│   ├── config/
+│   │   ├── database.py            # Connexion DB/Fabric
+│   │   └── fabric_automation.py   # Automatisation OneLake/Notebook
+│   ├── repository/
+│   │   └── fabric_repository.py   # Accès données prédictions/modèles
+│   └── routers/
+│       ├── health.py
+│       ├── sync.py
+│       ├── predict.py
+│       └── models.py
+│
+├── tests/
+├── requirements.txt
+├── Dockerfile
+├── .env
+└── README.md
+```
+
+---
+
+## 4) Prérequis
+
+- Python 3.11 recommandé
+- `pip`
+- Accès à `api-dataclean` (local ou Docker)
+- Modèles Prophet présents dans `models/saved/` (racine projet)
+- Accès DB/Fabric si endpoints Fabric utilisés
+
+---
+
+## 5) Configuration (`.env`)
+
+Variables essentielles :
 
 ```env
-INFERENCE_API_KEY=dev-inference-key
 DATACLEAN_BASE_URL=http://127.0.0.1:8000
-CORS_ORIGINS=http://127.0.0.1:8501
+INFERENCE_API_KEY=dev-inference-key
+CORS_ORIGINS=*
+MLFLOW_TRACKING_URI=./mlruns
 ```
 
-## 🛠️ Lancement
+Variables DB/Fabric (selon vos routes actives) :
 
-Depuis `Modeles_TimesSeries/api/api-inference` :
+```env
+DB_SERVER=...
+DB_DATABASE=...
+DB_USER=...
+DB_PASSWORD=...
+```
+
+Notes :
+
+- en Docker Compose, `DATACLEAN_BASE_URL` devient souvent `http://api-dataclean:8000`
+- les endpoints protégés exigent l'en-tête `X-API-Key`
+
+---
+
+## 6) Installation et lancement local
 
 ```bash
-python -m pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8001
+cd api/api-inference
+python -m venv env_api
 ```
 
-Documentation Swagger : `http://127.0.0.1:8001/docs`
+- Windows PowerShell :
+```powershell
+.\env_api\Scripts\Activate.ps1
+```
+
+- macOS/Linux :
+```bash
+source env_api/bin/activate
+```
+
+Installer les dépendances :
+
+```bash
+pip install -r requirements.txt
+```
+
+Lancer l'API en local :
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+```
+
+URLs utiles :
+
+- API : http://127.0.0.1:8001
+- Swagger : http://127.0.0.1:8001/docs
 
 ---
 
-## 📚 Spécification des endpoints
+## 7) Endpoints principaux
 
-### **GET** `/health`
+## Santé
+- `GET /health`
 
-Vérifie que l'API est démarrée.
+## Synchronisation (protégé)
+- `POST /sync/prm/{prm}`
+- Télécharge un CSV depuis `api-dataclean` et l'écrit dans `data/raw/sites/dataclean_prm_{prm}.csv`
 
-#### Réponse (200)
-
-```json
-{
-  "status": "ok"
-}
-```
-
----
-
-### **POST** `/sync/prm/{prm}`
-
-Synchronise l'historique d'un PRM depuis `api-dataclean` et le sauvegarde localement.
-
-#### Paramètres
-
-| Paramètre | Type   | Obligatoire | Description |
-|-----------|--------|-------------|-------------|
-| `prm`     | string | ✅ Oui      | Identifiant PRM (14 chiffres) |
-
-#### Headers
-
-| Header      | Obligatoire | Description |
-|-------------|-------------|-------------|
-| `X-API-Key` | ✅ Oui      | Clé API d'accès |
-
-#### Exemple
-
+Exemple :
 ```bash
 curl -X POST "http://127.0.0.1:8001/sync/prm/30000250086126" \
   -H "X-API-Key: dev-inference-key"
 ```
 
-#### Réponse (200)
+## Prédiction Prophet (protégé)
+- `POST /predict/prm/{prm}`
+- Étapes internes :
+  1. récupère l'historique JSON depuis `api-dataclean`,
+  2. génère la météo future,
+  3. lance la prédiction Prophet,
+  4. retourne la série en JSON.
 
-```json
-{
-  "message": "Synchronisation réussie",
-  "prm": "30000250086126",
-  "file_path": ".../data/raw/sites/dataclean_prm_30000250086126.csv",
-  "rows": 26304
-}
-```
-
-#### Codes de retour
-
-- `200` : synchronisation OK
-- `401` : clé API absente/invalide
-- `422` : format PRM invalide
-- `502` : API dataclean inaccessible ou en erreur
-
----
-
-### **POST** `/predict/prm/{prm}`
-
-Lance une prédiction pour un PRM à partir de :
-1) l'historique récupéré en direct depuis `api-dataclean` (`/dataclean/allbyprm-json`),
-2) la génération météo future,
-3) le modèle Prophet du PRM.
-
-Le endpoint retourne directement la série de prédiction en JSON (aucune écriture CSV côté API inference).
-
-#### Paramètres
-
-| Paramètre | Type   | Obligatoire | Description |
-|-----------|--------|-------------|-------------|
-| `prm`     | string | ✅ Oui      | Identifiant PRM (14 chiffres) |
-
-#### Headers
-
-| Header      | Obligatoire | Description |
-|-------------|-------------|-------------|
-| `X-API-Key` | ✅ Oui      | Clé API d'accès |
-
-#### Exemple
-
+Exemple :
 ```bash
 curl -X POST "http://127.0.0.1:8001/predict/prm/30000250086126" \
   -H "X-API-Key: dev-inference-key"
 ```
 
-#### Réponse (200)
+## Dernière prédiction (protégé)
+- `GET /predictions/prm/{prm}/latest`
+- Lit les prédictions depuis Fabric (table dédiée)
 
-```json
-{
-  "message": "Prédiction générée",
-  "prm": "30000250086126",
-  "rows": 26280,
-  "start": "2026-03-23 00:00:00",
-  "end": "2029-03-22 23:00:00",
-  "series": [
-    {
-      "datetime": "2026-03-23 00:00:00",
-      "puissance_moy_heure_pred": 731.5,
-      "puissance_moy_heure_pred_lower": 690.2,
-      "puissance_moy_heure_pred_upper": 778.4,
-      "jours_depuis_debut": 1095.0,
-      "annee": 2026
-    }
-  ]
-}
-```
-
-#### Codes de retour
-
-- `200` : prédiction générée
-- `401` : clé API absente/invalide
-- `404` : historique dataclean vide ou modèle introuvable
-- `422` : format PRM invalide
-- `500` : erreur interne pipeline
-- `502` : API dataclean inaccessible / en erreur
-
----
-
-### **GET** `/predictions/prm/{prm}/latest`
-
-Retourne la dernière prédiction calculée et gardée en mémoire par l'API (après un appel POST `/predict/prm/{prm}`).
-
-#### Paramètres
-
-| Paramètre | Type   | Obligatoire | Description |
-|-----------|--------|-------------|-------------|
-| `prm`     | string | ✅ Oui      | Identifiant PRM (14 chiffres) |
-
-#### Headers
-
-| Header      | Obligatoire | Description |
-|-------------|-------------|-------------|
-| `X-API-Key` | ✅ Oui      | Clé API d'accès |
-
-#### Exemple
-
+Exemple :
 ```bash
 curl "http://127.0.0.1:8001/predictions/prm/30000250086126/latest" \
   -H "X-API-Key: dev-inference-key"
 ```
 
-#### Réponse (200)
-
-```json
-{
-  "message": "Prédiction générée",
-  "prm": "30000250086126",
-  "rows": 26280,
-  "start": "2026-03-23 00:00:00",
-  "end": "2029-03-22 23:00:00",
-  "series": [
-    {
-      "datetime": "2026-03-23 00:00:00",
-      "puissance_moy_heure_pred": 731.5,
-      "puissance_moy_heure_pred_lower": 690.2,
-      "puissance_moy_heure_pred_upper": 778.4,
-      "jours_depuis_debut": 1095.0,
-      "annee": 2026
-    }
-  ]
-}
-```
-
-#### Codes de retour
-
-- `200` : lecture OK
-- `401` : clé API absente/invalide
-- `404` : aucune prédiction en mémoire (il faut lancer POST `/predict/prm/{prm}`)
-- `422` : format PRM invalide
+## Modèles
+- `GET /models/list` : liste les modèles `_latest.pkl` détectés
+- routes additionnelles dans `/models/*` pour lecture/push registre modèle (selon configuration et droits)
 
 ---
 
-## 🧪 Tests
+## 8) Exemples Python
+
+### Lancer une prédiction
+
+```python
+import requests
+
+PRM = "30000250086126"
+headers = {"X-API-Key": "dev-inference-key"}
+
+response = requests.post(
+    f"http://127.0.0.1:8001/predict/prm/{PRM}",
+    headers=headers,
+    timeout=180,
+)
+response.raise_for_status()
+
+payload = response.json()
+print(payload["message"], payload["rows"])
+print(payload["start"], "->", payload["end"])
+```
+
+### Lire la dernière série stockée
+
+```python
+import requests
+
+PRM = "30000250086126"
+headers = {"X-API-Key": "dev-inference-key"}
+
+response = requests.get(
+    f"http://127.0.0.1:8001/predictions/prm/{PRM}/latest",
+    headers=headers,
+    timeout=60,
+)
+response.raise_for_status()
+
+data = response.json()
+print("source:", data.get("source"))
+print("points:", data.get("rows"))
+```
+
+---
+
+## 9) Intégration avec le reste du projet
+
+- `api-dataclean` fournit l'historique (CSV/JSON)
+- `api-inference` calcule ou lit les prédictions
+- `dashboard_app.py` consomme surtout :
+  - `/models/list`
+  - `/predictions/prm/{prm}/latest`
+
+---
+
+## 10) Docker
+
+Construire l'image (depuis la racine projet ou selon votre contexte Docker) :
 
 ```bash
-pytest -q
+docker build -f api/api-inference/Dockerfile -t api-inference .
 ```
 
-Couverture actuelle :
-- santé API,
-- authentification,
-- validation PRM,
-- lecture de la dernière prédiction.
+Lancer le conteneur :
 
-## ✅ Alignement C9 (certification)
+```bash
+docker run -p 8001:8001 --env-file api/api-inference/.env api-inference
+```
 
-- API REST exposant des fonctions du modèle IA
-- Authentification d'accès (API key)
-- Endpoints documentés + OpenAPI (`/docs`)
-- Tests automatisés des endpoints principaux
-
-## ⚠️ Limites (version volontairement simple)
-
-- Authentification basique (pas de JWT/OAuth2)
-- Pas de rate limiting avancé
-- Les prédictions "latest" sont en mémoire uniquement (perdues au redémarrage)
-
-Ce choix est assumé pour garder une solution lisible, pédagogique et présentable en soutenance.
+Le `Dockerfile` expose le port `8001` et démarre `uvicorn` sur ce port.
 
 ---
 
-## 🔁 Automatisation Fabric (local → OneLake → Notebook)
+## 11) Tests
 
-Quand le SQL endpoint Lakehouse refuse le DML (`24559`), l'API écrit dans `exports/fabric_outbox.jsonl`.
+Depuis `api/api-inference/` :
 
-Vous pouvez activer le pipeline 100% automatisé :
-
-1. Upload de l'outbox locale vers OneLake (`Files/exports/fabric_outbox.jsonl`)
-2. Déclenchement d'un Notebook Fabric qui ingère l'outbox dans les tables Delta
-
-### Variables `.env`
-
-```env
-FABRIC_AUTOMATION_ENABLED=true
-FABRIC_TENANT_ID=<tenant-guid>
-FABRIC_CLIENT_ID=<app-client-id>
-FABRIC_CLIENT_SECRET=<app-secret>
-
-ONELAKE_WORKSPACE_NAME=DATA_PLATEFORME_INGESTION_LXE
-ONELAKE_LAKEHOUSE_NAME=LH_Projet_Conso_Energie
-ONELAKE_OUTBOX_REMOTE_PATH=Files/exports/fabric_outbox.jsonl
-
-FABRIC_WORKSPACE_ID=<fabric-workspace-id>
-FABRIC_NOTEBOOK_ITEM_ID=<fabric-notebook-item-id>
-FABRIC_NOTEBOOK_TRIGGER_PAYLOAD_JSON={"executionData":{"parameters":{}}}
+```bash
+pytest tests/
 ```
 
-### Droits requis (service principal)
-
-- Accès `Storage` sur le Lakehouse/OneLake pour écrire dans `Files/...`
-- Accès `Run` sur le Notebook Fabric ciblé
-- Consentement admin pour les scopes token utilisés par l'API :
-  - `https://storage.azure.com/.default`
-  - `https://api.fabric.microsoft.com/.default`
-
-### Comportement API
-
-- `POST /models/prm/{prm}/push` :
-  - si DML disponible : écrit directement dans Fabric SQL endpoint
-  - si erreur `24559` : écrit dans outbox locale, upload OneLake, puis trigger Notebook
-
-- `POST /models/push-all` : même logique pour chaque modèle
+Depuis la racine du projet, tu peux aussi exécuter la suite globale.
 
 ---
 
-## 🌐 Mode Pull Fabric (recommandé)
+## 12) Dépannage rapide
 
-En alternative au trigger depuis l'API locale, Fabric peut venir lire les données directement :
+### `401 Clé API invalide ou manquante`
+- Vérifier l'en-tête `X-API-Key`
+- Vérifier `INFERENCE_API_KEY` dans `.env`
 
-- `GET /fabric-exports/pending?limit=500`
-  - retourne les événements outbox non acquittés
-  - nécessite header `X-API-Key`
+### `502 Dataclean API indisponible`
+- Vérifier que `api-dataclean` tourne
+- Vérifier `DATACLEAN_BASE_URL`
 
-- `POST /fabric-exports/ack`
-  - body JSON : `{"event_ids": ["..."]}`
-  - supprime les événements traités de l'outbox locale
-  - nécessite header `X-API-Key`
+### `404 Modèle Prophet introuvable`
+- Vérifier la présence du fichier : `models/saved/prophet_model_<prm>_latest.pkl`
+- Vérifier que le PRM contient 14 chiffres
 
-Notebook prêt à l'emploi (Fabric pull) :
-- `Modeles_TimesSeries/docs annexes/fabric_pull_from_inference_api.ipynb`
+### `503 Erreur Fabric`
+- Vérifier les variables DB/Fabric
+- Vérifier droits et connectivité réseau
 
-Pré-requis réseau :
-- l'URL de `api-inference` doit être accessible depuis Fabric (tunnel, endpoint public, ou réseau autorisé)
+---
+
+## 13) Résumé
+
+`api-inference` est la couche d'orchestration de l'inférence :
+
+- elle relie données historiques, modèle et restitution API,
+- elle sécurise les routes sensibles par clé API,
+- elle fournit une base solide pour un usage dashboard/production.
