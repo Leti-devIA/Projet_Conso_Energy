@@ -1,11 +1,12 @@
 import sys
 from pathlib import Path
+from app.project_paths import resolve_project_root
 
 # -------------------------------------------------------
 # On ajoute Modeles_TimesSeries/ au path Python
 # pour que les imports de src/ fonctionnent partout
 # -------------------------------------------------------
-PROJECT_ROOT = Path(__file__).resolve().parents[3]  # api-inference/app/ -> api-inference/ -> api/ -> Modeles_TimesSeries/
+PROJECT_ROOT = resolve_project_root(Path(__file__))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 # On change aussi le dossier courant pour que config/config.yaml soit trouvé
@@ -18,7 +19,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routers.health import router as health_router
 from app.routers.predict import router as predict_router
 from app.routers.models import router as models_router
-from app.routers.fabric_exports import router as fabric_exports_router
 from app.routers.sync import router as sync_router
 from app.settings import CORS_ORIGINS
 
@@ -52,7 +52,6 @@ app.include_router(health_router)
 app.include_router(sync_router)
 app.include_router(predict_router)
 app.include_router(models_router)
-app.include_router(fabric_exports_router)
 
 @app.get("/")
 def root() -> dict:

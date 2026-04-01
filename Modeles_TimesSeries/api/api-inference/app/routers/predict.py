@@ -8,9 +8,12 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.security import require_api_key
 from app.settings import CONFIG_PATH, DATACLEAN_BASE_URL, MODELS_DIR
+from app.project_paths import resolve_project_root
+from app.config.database import get_db_connection
+from app.repository.fabric_repository import FabricRepository
 
 # Ce path permet d'importer les modules du projet principal (src/*)
-PROJECT_ROOT = Path(__file__).resolve().parents[4]  # remonte jusqu'à Modeles_TimesSeries/
+PROJECT_ROOT = resolve_project_root(Path(__file__))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.generate_climate_averages import (
@@ -170,18 +173,48 @@ def predict_prm(prm: str, _: str = Depends(require_api_key)) -> dict:
     "/predictions/prm/{prm}/latest",
     summary="Récupérer la dernière prédiction d'un PRM",
     description=(
-        "Retourne la dernière prédiction conservée en mémoire par l'API après un appel à POST /predict/prm/{prm}."
+        "Retourne la dernière prédiction stockée dans Fabric (table ia_predictions) pour un PRM."
     )
 )
 def get_latest_prediction(prm: str, _: str = Depends(require_api_key)) -> dict:
-    """Endpoint de lecture utilisé directement par le dashboard."""
+    """Lecture des prédictions depuis Fabric pour le dashboard."""
     if not PRM_PATTERN.match(prm):
         raise HTTPException(status_code=422, detail="Le PRM doit contenir exactement 14 chiffres")
 
-    if prm not in LATEST_PREDICTIONS:
-        raise HTTPException(
-            status_code=404,
-            detail="Aucune prédiction en mémoire pour ce PRM. Lance d'abord POST /predict/prm/{prm}."
-        )
+    conn = None
+    try:
+        conn = get_db_connection()
+        repo = FabricRepository(conn)
+        series = repo.get_latest_predictions_series(prm)
 
-    return LATEST_PREDICTIONS[prm]
+        if series is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Impossible de lire ia_predictions dans Fabric"
+            )
+
+        if not series:
+            raise HTTPException(
+                status_code=404,
+                detail="Aucune prédiction trouvée dans Fabric pour ce PRM"
+            )
+
+        return {
+            "message": "Prédiction lue depuis Fabric",
+            "prm": prm,
+            "rows": len(series),
+            "start": series[0]["datetime"],
+            "end": series[-1]["datetime"],
+            "series": series,
+            "source": "fabric",
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Erreur Fabric: {str(exc)}") from exc
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass

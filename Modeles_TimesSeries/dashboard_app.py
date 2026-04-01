@@ -14,11 +14,19 @@ import hashlib
 import hmac
 import re
 import sqlite3
+import os
 
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+import httpx
+
+
+# ── Configuration API ──────────────────────────────────────────────────────────
+API_INFERENCE_URL = os.getenv("API_INFERENCE_URL", "http://localhost:8001")
+API_DATACLEAN_URL = os.getenv("API_DATACLEAN_URL", "http://localhost:8000")
+API_KEY = os.getenv("API_KEY", "dev-inference-key")  # Clé par défaut pour dev
 
 
 # ── Chemins projet ─────────────────────────────────────────────────────────────
@@ -37,13 +45,56 @@ W_TO_MWH = 1 / 1_000_000      # W (sur 1 h) → MWh
 
 @st.cache_data
 def load_sites() -> pd.DataFrame:
+    """Charge les sites depuis l'API inference (/models/list) avec fallback CSV."""
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            response = client.get(f"{API_INFERENCE_URL}/models/list")
+
+        if response.status_code == 200:
+            data = response.json()
+            models = data.get("models", [])
+
+            if models:
+                # Extrait les PRMs de la liste des modèles
+                df = pd.DataFrame([{"prm": m["prm"]} for m in models])
+                df["prm"] = df["prm"].astype(str)
+
+                # Tente de récupérer les détails depuis la table sites locale
+                sites_csv_df = _load_sites_csv()
+                if not sites_csv_df.empty:
+                    # Merge avec les infos locales (ville, id_site)
+                    df = df.merge(sites_csv_df[["prm", "ville", "id_site"]], on="prm", how="left")
+
+                # Créer site_label (soit "ville (prm)" soit juste "prm")
+                if "ville" in df.columns:
+                    df["site_label"] = df["ville"].fillna("Inconnu").astype(str) + " (" + df["prm"] + ")"
+                else:
+                    df["ville"] = "Inconnu"
+                    df["id_site"] = ""
+                    df["site_label"] = "Site " + df["prm"]
+                return df
+
+        st.warning(f"⚠️ API /models/list indisponible ({response.status_code}), fallback CSV...")
+
+    except Exception as e:
+        st.warning(f"⚠️ Erreur charge sites API: {str(e)}, fallback CSV...")
+
+    return _load_sites_csv()
+
+
+def _load_sites_csv() -> pd.DataFrame:
+    """Fallback : charge les sites depuis le CSV local."""
     if not SITES_FILE.exists():
         return pd.DataFrame(columns=["prm", "ville", "id_site"])
 
-    df = pd.read_csv(SITES_FILE)
-    df["prm"] = df["prm"].astype(str)
-    df["site_label"] = df["ville"].astype(str) + " (" + df["prm"] + ")"
-    return df
+    try:
+        df = pd.read_csv(SITES_FILE)
+        df["prm"] = df["prm"].astype(str)
+        df["site_label"] = df["ville"].astype(str) + " (" + df["prm"] + ")"
+        return df
+    except Exception as e:
+        st.warning(f"⚠️ Erreur charge CSV sites: {str(e)}")
+        return pd.DataFrame(columns=["prm", "ville", "id_site"])
 
 
 def _extract_prm_from_name(filename: str) -> str | None:
@@ -53,6 +104,83 @@ def _extract_prm_from_name(filename: str) -> str | None:
 
 @st.cache_data
 def load_predictions() -> pd.DataFrame:
+    """Charge les prédictions uniquement depuis l'API/Fabric.
+
+    Le dashboard ne déclenche plus de POST /predict.
+    Les prédictions doivent être générées et stockées côté Fabric (ex: Notebook Fabric).
+    """
+    try:
+        # Récupère d'abord la liste des sites pour savoir quels PRMs charger
+        sites_df = load_sites()
+        if sites_df.empty:
+            return pd.DataFrame()
+
+        frames = []
+        failed_prms: list[tuple[str, int]] = []
+
+        for _, row in sites_df.iterrows():
+            prm = str(row["prm"])
+            try:
+                with httpx.Client(timeout=120.0) as client:
+                    pred_response = client.get(
+                        f"{API_INFERENCE_URL}/predictions/prm/{prm}/latest",
+                        headers={"X-API-Key": API_KEY}
+                    )
+
+                if pred_response.status_code == 200:
+                    pred_data = pred_response.json()
+                    series = pred_data.get("series", [])
+
+                    if series:
+                        df = pd.DataFrame(series)
+                        df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
+                        df["prm"] = prm
+
+                        # Normaliser le nom de la colonne puissance
+                        if "puissance_kw" not in df.columns:
+                            if "puissance_moy_heure_pred" in df.columns:
+                                df["puissance_kw"] = df["puissance_moy_heure_pred"] / 1_000
+                            elif "puissance_kw_pred" in df.columns:
+                                df["puissance_kw"] = df["puissance_kw_pred"]
+
+                        df = df[["prm", "datetime", "puissance_kw"]].copy()
+                        frames.append(df)
+                else:
+                    failed_prms.append((prm, pred_response.status_code))
+
+            except Exception as e:
+                failed_prms.append((prm, -1))
+                continue
+
+        if failed_prms:
+            code_counts: dict[str, int] = {}
+            for _, status_code in failed_prms:
+                code_key = "exception" if status_code == -1 else str(status_code)
+                code_counts[code_key] = code_counts.get(code_key, 0) + 1
+            summary = ", ".join([f"{count}x {code}" for code, count in sorted(code_counts.items())])
+            st.info(f"ℹ️ PRM sans prédictions Fabric: {len(failed_prms)} ({summary})")
+
+        if not frames:
+            st.warning("Aucune prédiction disponible dans Fabric. Lance le notebook Fabric pour alimenter ia_predictions.")
+            return pd.DataFrame()
+
+        out = pd.concat(frames, ignore_index=True)
+        out["prm"] = out["prm"].astype(str)
+        out["data_type"] = "Prévision"
+
+        # Ajouter site_label en fusionnant avec sites
+        sites_df = load_sites()[["prm", "site_label"]]
+        out = out.merge(sites_df, on="prm", how="left")
+
+        return out
+
+    except Exception as e:
+        st.warning(f"⚠️ Erreur chargement prédictions Fabric/API: {str(e)}")
+        return pd.DataFrame()
+
+
+def _load_predictions_csv() -> pd.DataFrame:
+    """Fallback : charge les prédictions depuis les CSV locaux (ancienne méthode)."""
     if not PRED_DIR.exists():
         return pd.DataFrame()
 
@@ -82,11 +210,86 @@ def load_predictions() -> pd.DataFrame:
     out = pd.concat(frames, ignore_index=True)
     out["prm"] = out["prm"].astype(str)
     out["data_type"] = "Prévision"
+
+    # Ajouter site_label en fusionnant avec sites
+    sites_df = load_sites()[["prm", "site_label"]]
+    out = out.merge(sites_df, on="prm", how="left")
+
     return out
 
 
 @st.cache_data
 def load_historical_data() -> pd.DataFrame:
+    """Charge l'historique depuis l'API dataclean (/dataclean/allbyprm-json) avec fallback CSV."""
+    try:
+        sites_df = load_sites()
+        if sites_df.empty:
+            st.warning("⚠️ Aucun site configuré")
+            return pd.DataFrame()
+
+        frames = []
+
+        for _, row in sites_df.iterrows():
+            prm = str(row["prm"])
+            try:
+                # Récupère l'historique depuis API dataclean
+                with httpx.Client(timeout=120.0) as client:
+                    hist_response = client.get(
+                        f"{API_DATACLEAN_URL}/dataclean/allbyprm-json",
+                        params={"prm": prm}
+                    )
+
+                if hist_response.status_code == 200:
+                    hist_data = hist_response.json()
+                    rows = hist_data.get("rows", [])
+
+                    if rows:
+                        df = pd.DataFrame(rows)
+
+                        # Parser la colonne datetime
+                        if "datetime" in df.columns:
+                            df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
+                        else:
+                            continue
+
+                        # Normaliser puissance (si en W, convertir en kW)
+                        if "puissance_moy_heure" in df.columns:
+                            df["puissance_kw"] = df["puissance_moy_heure"] / 1_000
+                        elif "puissance_kw" not in df.columns:
+                            continue
+
+                        df["prm"] = prm
+                        df = df[["prm", "datetime", "puissance_kw"]].copy()
+                        frames.append(df)
+                        st.success(f"✅ Historique chargé pour {prm}")
+                else:
+                    st.warning(f"⚠️ API dataclean indisponible pour {prm} ({hist_response.status_code})")
+
+            except Exception as e:
+                st.warning(f"⚠️ Erreur historique {prm}: {str(e)}")
+                continue
+
+        if not frames:
+            st.info("ℹ️ Aucun historique disponible via l'API, fallback CSV...")
+            return _load_historical_data_csv()
+
+        out = pd.concat(frames, ignore_index=True)
+        out["prm"] = out["prm"].astype(str)
+        out["data_type"] = "Historique"
+
+        # Ajouter site_label en fusionnant avec sites
+        sites_df = load_sites()[["prm", "site_label"]]
+        out = out.merge(sites_df, on="prm", how="left")
+
+        return out
+
+    except Exception as e:
+        st.warning(f"⚠️ Erreur chargement historique API: {str(e)}, fallback CSV...")
+        return _load_historical_data_csv()
+
+
+def _load_historical_data_csv() -> pd.DataFrame:
+    """Fallback : charge l'historique depuis les CSV locaux (ancienne méthode)."""
     if not PROCESSED_DIR.exists():
         return pd.DataFrame()
 
@@ -116,6 +319,11 @@ def load_historical_data() -> pd.DataFrame:
     out = pd.concat(frames, ignore_index=True)
     out["prm"] = out["prm"].astype(str)
     out["data_type"] = "Historique"
+
+    # Ajouter site_label en fusionnant avec sites
+    sites_df = load_sites()[["prm", "site_label"]]
+    out = out.merge(sites_df, on="prm", how="left")
+
     return out
 
 
@@ -466,28 +674,25 @@ preds_df = load_predictions()
 hist_df = load_historical_data()
 
 if preds_df.empty:
-    st.warning("Aucune prediction disponible dans data/predictions.")
+    st.warning("Aucune prediction disponible depuis Fabric.")
     st.stop()
 
 if "puissance_kw" not in preds_df.columns:
     st.error("Colonne puissance_kw manquante dans les predictions.")
     st.stop()
 
-preds_df = preds_df.merge(
-    sites_df[["prm", "site_label"]],
-    on="prm",
-    how="left",
-)
-preds_df["site_label"] = preds_df["site_label"].fillna("PRM " + preds_df["prm"])
+# Assurer que site_label existe (créé lors du merge dans load_predictions)
+if "site_label" not in preds_df.columns:
+    preds_df["site_label"] = "PRM " + preds_df["prm"].astype(str)
+else:
+    preds_df["site_label"] = preds_df["site_label"].fillna("PRM " + preds_df["prm"].astype(str))
 
-# Merge site_label sur l'historique aussi
+# Idem pour l'historique
 if not hist_df.empty:
-    hist_df = hist_df.merge(
-        sites_df[["prm", "site_label"]],
-        on="prm",
-        how="left",
-    )
-    hist_df["site_label"] = hist_df["site_label"].fillna("PRM " + hist_df["prm"])
+    if "site_label" not in hist_df.columns:
+        hist_df["site_label"] = "PRM " + hist_df["prm"].astype(str)
+    else:
+        hist_df["site_label"] = hist_df["site_label"].fillna("PRM " + hist_df["prm"].astype(str))
 
 min_date_pred = preds_df["datetime"].min()
 max_date_pred = preds_df["datetime"].max()

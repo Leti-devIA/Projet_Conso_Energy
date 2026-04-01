@@ -2,12 +2,13 @@ import os
 import json
 from pathlib import Path
 from dotenv import load_dotenv
+from app.project_paths import resolve_project_root
 
 # Charge le fichier .env
 env_file = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(env_file)
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = resolve_project_root(Path(__file__))
 
 DATACLEAN_BASE_URL = os.getenv("DATACLEAN_BASE_URL", "http://127.0.0.1:8000")
 CONFIG_PATH = PROJECT_ROOT / "config" / "config.yaml"

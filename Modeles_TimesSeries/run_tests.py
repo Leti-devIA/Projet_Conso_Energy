@@ -16,8 +16,6 @@ import subprocess
 import sys
 import argparse
 from pathlib import Path
-import pytest
-
 
 def run_command(cmd, description=""):
     """Exécute une commande shell et retourne le code de sortie."""

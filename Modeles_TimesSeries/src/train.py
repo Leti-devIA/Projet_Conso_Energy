@@ -350,9 +350,6 @@ def train_one_site(data_path, config, prm, config_path):
         print(f"   Prophet → MAE={metrics['mae']:.2f} W  RMSE={metrics['rmse']:.2f} W  "
               f"MAPE={metrics['mape']:.1f}%  R²={metrics['r2']:.4f}")
 
-        # Protocole aligné avec grid_search.py : pas de cross-validation,
-        # uniquement une évaluation holdout temporelle unique.
-
         # Sauvegarde
         print("\n--- Sauvegarde ---")
         save_model(model, config, metrics, prm)

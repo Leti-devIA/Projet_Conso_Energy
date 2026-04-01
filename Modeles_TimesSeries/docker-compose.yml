@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
 
   # ───────────────────────────────────────────────────────────
@@ -54,10 +52,10 @@ services:
     networks:
       - conso-network
     volumes:
+      # Code API monté en live (évite rebuild complet à chaque correctif)
+      - ./api/api-inference/app:/app/app
       # Modèles entraînés (lecture/écriture pour pouvoir en rajouter)
       - ./models/saved:/app/models/saved
-      # Outbox Fabric partagée entre l'API et ton PC
-      - ./exports:/app/exports
       # MLflow runs (pour les métriques)
       - ./api/api-inference/mlruns:/app/mlruns
     healthcheck:
@@ -86,6 +84,30 @@ services:
       - conso-network
     profiles:
       - local   # docker compose --profile local up
+
+  # ───────────────────────────────────────────────────────────
+  # Sync config ngrok -> Fabric runtime (one-shot)
+  # Génère automatiquement config/fabric_runtime.env
+  # ───────────────────────────────────────────────────────────
+  ngrok-config-sync:
+    image: python:3.11-slim
+    container_name: ngrok-config-sync
+    working_dir: /workspace
+    command: ["python", "scripts/sync_ngrok_to_fabric_config.py"]
+    environment:
+      - NGROK_API_URL=http://ngrok:4040/api/tunnels
+      - SYNC_OUTPUT_ENV=/workspace/config/fabric_runtime.env
+      - SYNC_MAX_WAIT_SECONDS=90
+      - SYNC_POLL_INTERVAL_SECONDS=2
+    volumes:
+      - ./:/workspace
+    depends_on:
+      - ngrok
+    networks:
+      - conso-network
+    restart: "no"
+    profiles:
+      - local
 
 # ─── Réseau interne partagé ────────────────────────────────
 networks:

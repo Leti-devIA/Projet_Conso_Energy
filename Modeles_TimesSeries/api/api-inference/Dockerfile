@@ -13,24 +13,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Build context = Modeles_TimesSeries/ ──────────────────
-# Dépendances Python
-COPY api/api-inference/requirements.txt .
+
+# Dépendances Python API uniquement (build plus rapide)
+COPY api/api-inference/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Code de l'API inference
 COPY api/api-inference/app/ ./app/
 
-# Modèles entraînés (écrasés par le volume en prod)
-COPY models/saved/ ./models/saved/
+# Module src (Prophet, features engineering, etc.)
+COPY src/ ./src/
 
 # Config YAML
 COPY config/ ./config/
 
-# Module src (Prophet, features engineering, etc.)
-COPY src/ ./src/
+# Modèles entraînés (uniquement fichiers _latest.pkl)
+COPY models/saved/*_latest.pkl ./models/saved/
 
-# Dossier exports (outbox Fabric — monté en volume en prod)
-RUN mkdir -p /app/exports
+# Données (pour seed, historique, etc.)
+COPY data/ ./data/
+
+# Dossiers de travail
+RUN mkdir -p /app/exports /app/logs /app/mlruns /app/mlruns_temp
 
 # Port exposé
 EXPOSE 8001

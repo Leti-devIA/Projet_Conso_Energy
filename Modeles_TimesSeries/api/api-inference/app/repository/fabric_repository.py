@@ -1,92 +1,19 @@
-"""
-Requêtes pyodbc verso les tables IA du Fabric Warehouse.
+"""Repository Fabric (lecture modèles + prédictions)."""
 
-Tables ciblées (T-SQL, schéma ia) :
-    ia_modeles    – référentiel de modèles Prophet par PRM
-    ia_metrics    – métriques MAE/RMSE/MAPE/R2 par modèle
-
-Prérequis :
-    - Les tables existent dans le Warehouse
-    - DB_SERVER + DB_DATABASE définis dans .env
-"""
+import logging
+from typing import Optional, Dict, List
 
 import pyodbc
-import uuid
-import logging
-from datetime import datetime
-from typing import Optional, Dict, List
 
 logger = logging.getLogger(__name__)
 
 
-class FabricDmlNotSupportedError(RuntimeError):
-    """Le endpoint SQL cible refuse les opérations DML (ex: Lakehouse Delta via ODBC)."""
-
-
 class FabricRepository:
-    """Gère les interactions avec les tables ia_* dans Fabric Warehouse"""
+    """Accès en lecture aux modèles et prédictions dans Fabric Warehouse."""
 
     def __init__(self, conn: pyodbc.Connection):
         self.conn = conn
         self.cursor = conn.cursor()
-
-    @staticmethod
-    def _is_dml_not_supported_error(error: Exception) -> bool:
-        """Détecte l'erreur SQL Server 24559 remontée par Fabric SQL endpoint."""
-        msg = str(error)
-        return "24559" in msg and "DML" in msg
-
-    # -------------------------------------------------------
-    # ia_modeles
-    # -------------------------------------------------------
-
-    def upsert_model_registry(
-        self,
-        model_id: str,
-        prm: str,
-        model_name: str,
-        model_version: str,
-        artifact_uri: str,
-        created_at: datetime,
-        is_active: bool
-    ) -> None:
-        """
-        Écrit le modèle dans ia_modeles.
-
-        Désactive l'ancienne version active, insère la nouvelle.
-        """
-
-        logger.info(f"📝 Enregistrement {prm} dans ia_modeles...")
-
-        try:
-            # Désactiver l'ancienne version
-            self.cursor.execute(
-                "UPDATE ia_modeles SET IS_ACTIVE = 0 WHERE PRM = ? AND IS_ACTIVE = 1",
-                (prm,)
-            )
-            logger.info(f"   ↻ Ancienne version désactivée")
-
-            # Insérer la nouvelle
-            self.cursor.execute(
-                """
-                INSERT INTO ia_modeles
-                    (ID_MODELE, PRM, NOM_MODELE, VERSION_MODELE, URI, DATE_CREATION, IS_ACTIVE)
-                VALUES
-                    (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (model_id, prm, model_name, model_version, artifact_uri,
-                 created_at, 1 if is_active else 0)
-            )
-
-            self.conn.commit()
-            logger.info(f"   ✅ {prm} écrit en Fabric")
-
-        except Exception as e:
-            if self._is_dml_not_supported_error(e):
-                logger.error(f"❌ DML non supporté pour ia_modeles : {str(e)}")
-                raise FabricDmlNotSupportedError(str(e)) from e
-            logger.error(f"❌ Erreur upsert model_registry : {str(e)}")
-            raise
 
     def get_active_model(self, prm: str) -> Optional[Dict]:
         """Récupère le modèle actif d'un PRM depuis Fabric."""
@@ -131,50 +58,102 @@ class FabricRepository:
             logger.error(f"❌ Erreur get_active_model : {str(e)}")
             return None
 
-    # -------------------------------------------------------
-    # ia.training_metrics
-    # -------------------------------------------------------
+    def get_latest_predictions_series(self, prm: str) -> Optional[List[Dict]]:
+        """Lit la dernière série de prédictions d'un PRM depuis Fabric.
 
-    def insert_training_metrics(
-        self,
-        model_id: str,
-        prm: str,
-        metrics: Dict[str, float],
-        measured_at: datetime
-    ) -> int:
-        """Écrit les métriques dans ia.training_metrics."""
+        Attendu : table `ia_predictions` avec colonnes de base :
+        - PRM
+        - DATETIME_PRED
+        - PUISSANCE_MOY_HEURE_PRED
+        - DATE_GENERATION (optionnel mais recommandé)
+        """
+        logger.info(f"📖 Lecture prédictions Fabric pour {prm}...")
 
-        logger.info(f"📊 Enregistrement {len(metrics)} métrique(s) dans ia_metrics...")
+        sql_candidates = [
+            """
+            SELECT
+                PRM,
+                DATETIME_PRED,
+                PUISSANCE_MOY_HEURE_PRED,
+                PUISSANCE_MOY_HEURE_PRED_LOWER,
+                PUISSANCE_MOY_HEURE_PRED_UPPER,
+                JOURS_DEPUIS_DEBUT,
+                ANNEE,
+                DATE_GENERATION
+            FROM ia_predictions
+            WHERE PRM = ?
+              AND DATE_GENERATION = (
+                    SELECT MAX(DATE_GENERATION)
+                    FROM ia_predictions
+                    WHERE PRM = ?
+              )
+            ORDER BY DATETIME_PRED
+            """,
+            """
+            SELECT
+                PRM,
+                DATETIME_PRED,
+                PUISSANCE_MOY_HEURE_PRED,
+                PUISSANCE_MOY_HEURE_PRED_LOWER,
+                PUISSANCE_MOY_HEURE_PRED_UPPER,
+                JOURS_DEPUIS_DEBUT,
+                ANNEE,
+                NULL AS DATE_GENERATION
+            FROM ia_predictions
+            WHERE PRM = ?
+            ORDER BY DATETIME_PRED
+            """,
+        ]
 
-        if not metrics:
-            logger.warning(f"   ⚠️ Aucune métrique à insérer")
-            return 0
+        rows = None
+        last_error: Exception | None = None
 
-        try:
-            # Prépare les lignes
-            rows = [
-                (str(uuid.uuid4()), model_id, prm, name, float(value), measured_at)
-                for name, value in metrics.items()
-            ]
+        for sql in sql_candidates:
+            try:
+                params = (prm, prm) if "MAX(DATE_GENERATION)" in sql else (prm,)
+                self.cursor.execute(sql, params)
+                rows = self.cursor.fetchall()
+                break
+            except Exception as exc:
+                last_error = exc
+                continue
 
-            # Insère en masse
-            self.cursor.executemany(
-                """
-                INSERT INTO ia_metrics
-                    (ID_METRIC, ID_MODELE, PRM, TYPE_METRIC, VALEUR_METRIC, DATE_MESURE)
-                VALUES
-                    (?, ?, ?, ?, ?, ?)
-                """,
-                rows
+        if rows is None:
+            logger.error("❌ Erreur SQL lecture ia_predictions")
+            if last_error:
+                logger.error(str(last_error))
+            return None
+
+        if not rows:
+            logger.warning(f"   ⚠️ Aucune prédiction trouvée pour {prm}")
+            return []
+
+        columns = [col[0] for col in self.cursor.description]
+        output: List[Dict] = []
+        for row in rows:
+            data = dict(zip(columns, row))
+            output.append(
+                {
+                    "datetime": str(data.get("DATETIME_PRED")) if data.get("DATETIME_PRED") is not None else None,
+                    "puissance_moy_heure_pred": float(data.get("PUISSANCE_MOY_HEURE_PRED")) if data.get("PUISSANCE_MOY_HEURE_PRED") is not None else None,
+                    "puissance_moy_heure_pred_lower": (
+                        float(data.get("PUISSANCE_MOY_HEURE_PRED_LOWER"))
+                        if data.get("PUISSANCE_MOY_HEURE_PRED_LOWER") is not None
+                        else None
+                    ),
+                    "puissance_moy_heure_pred_upper": (
+                        float(data.get("PUISSANCE_MOY_HEURE_PRED_UPPER"))
+                        if data.get("PUISSANCE_MOY_HEURE_PRED_UPPER") is not None
+                        else None
+                    ),
+                    "jours_depuis_debut": (
+                        float(data.get("JOURS_DEPUIS_DEBUT"))
+                        if data.get("JOURS_DEPUIS_DEBUT") is not None
+                        else None
+                    ),
+                    "annee": int(data.get("ANNEE")) if data.get("ANNEE") is not None else None,
+                }
             )
 
-            self.conn.commit()
-            logger.info(f"   ✅ {len(rows)} métrique(s) écrite(s) en Fabric")
-            return len(rows)
-
-        except Exception as e:
-            if self._is_dml_not_supported_error(e):
-                logger.error(f"❌ DML non supporté pour ia_metrics : {str(e)}")
-                raise FabricDmlNotSupportedError(str(e)) from e
-            logger.error(f"❌ Erreur insert_training_metrics : {str(e)}")
-            raise
+        logger.info(f"   ✅ {len(output)} point(s) de prédiction lus depuis Fabric")
+        return output
