@@ -45,6 +45,11 @@ services:
     environment:
       # Dans Docker, on appelle le service par son nom (pas 127.0.0.1)
       - DATACLEAN_BASE_URL=http://api-dataclean:8000
+      - DB_SERVER=${DB_SERVER}
+      - DB_DATABASE=${DB_DATABASE}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_USERNAME=${DB_USERNAME:-}
     depends_on:
       api-dataclean:
         condition: service_healthy

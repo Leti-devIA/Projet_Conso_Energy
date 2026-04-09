@@ -1,12 +1,48 @@
 from fastapi import APIRouter, Query, HTTPException
 from fastapi.responses import StreamingResponse
-from app.config.database import get_database_connection
+from app.config.database import get_database_connection, close_database_connection
 from app.services.csv_export import stream_rows_to_csv
 from app.repository.data_repository import get_rows_by_prm, get_all_previsions_meteo, get_all_sites, get_all_prix_spot
 import asyncio
 import traceback
+import pyodbc
 
 router = APIRouter()
+
+
+def _is_link_failure(error: Exception) -> bool:
+    return isinstance(error, pyodbc.OperationalError) and "08S01" in str(error)
+
+
+async def _execute_query_with_retry(query_fn, *args):
+    loop = asyncio.get_event_loop()
+
+    connection = await get_database_connection()
+    if not connection:
+        raise HTTPException(status_code=503, detail="Base de données non disponible")
+
+    try:
+        return await loop.run_in_executor(None, query_fn, connection, *args)
+    except Exception as first_error:
+        if not _is_link_failure(first_error):
+            raise
+
+        print("⚠️ Lien ODBC perdu (08S01), tentative de reconnexion...")
+        await close_database_connection()
+
+        connection = await get_database_connection()
+        if not connection:
+            raise HTTPException(status_code=503, detail="Base de données indisponible après reconnexion")
+
+        try:
+            return await loop.run_in_executor(None, query_fn, connection, *args)
+        except Exception as second_error:
+            if _is_link_failure(second_error):
+                raise HTTPException(
+                    status_code=503,
+                    detail="Connexion SQL temporairement indisponible (ODBC 08S01)."
+                )
+            raise
 
 
 @router.get(
@@ -64,21 +100,11 @@ async def get_all_by_prm_json(prm: str = Query(...)):
     """Version JSON de /allbyprm, pensée pour les appels serveur-à-serveur."""
     print(f"📥 Requête JSON reçue pour PRM: {prm}")
 
-    connection = await get_database_connection()
-    if not connection:
-        print("❌ Pas de connexion à la base de données")
-        raise HTTPException(status_code=503, detail="Base de données non disponible")
-
     try:
         print("✅ Connexion établie, exécution de la requête SQL JSON...")
 
         loop = asyncio.get_event_loop()
-        cursor, columns = await loop.run_in_executor(
-            None,
-            get_rows_by_prm,
-            connection,
-            prm
-        )
+        cursor, columns = await _execute_query_with_retry(get_rows_by_prm, prm)
 
         rows = await loop.run_in_executor(None, cursor.fetchall)
         records = []
@@ -101,6 +127,8 @@ async def get_all_by_prm_json(prm: str = Query(...)):
         }
 
     except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
         print(f"❌ ERREUR COMPLÈTE: {type(e).__name__}: {str(e)}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Erreur lors de l'export JSON: {str(e)}")

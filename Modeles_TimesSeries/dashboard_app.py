@@ -255,6 +255,8 @@ def load_historical_data() -> pd.DataFrame:
                         # Normaliser puissance (si en W, convertir en kW)
                         if "puissance_moy_heure" in df.columns:
                             df["puissance_kw"] = df["puissance_moy_heure"] / 1_000
+                        elif "puissance" in df.columns:
+                            df["puissance_kw"] = df["puissance"] / 1_000
                         elif "puissance_kw" not in df.columns:
                             continue
 

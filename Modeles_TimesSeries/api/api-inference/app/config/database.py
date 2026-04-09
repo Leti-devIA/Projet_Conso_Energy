@@ -1,21 +1,44 @@
 """
 Gestionnaire de connexion au Fabric Warehouse via pyodbc.
 
-Utilise ActiveDirectoryInteractive pour l'authentification Azure AD.
+Utilise ActiveDirectoryPassword (Docker/serveur) ou ActiveDirectoryInteractive (local).
 """
 
+import os
 import pyodbc
 import logging
-from app.settings import DB_SERVER, DB_DATABASE
+from app.main import DB_SERVER, DB_DATABASE
 
 logger = logging.getLogger(__name__)
+
+
+def _select_odbc_driver() -> str:
+    """Sélectionne un driver SQL Server disponible sur l'environnement courant."""
+    forced_driver = os.getenv("DB_ODBC_DRIVER")
+    if forced_driver:
+        return forced_driver
+
+    available = pyodbc.drivers()
+    preferred = [
+        "ODBC Driver 18 for SQL Server",
+        "ODBC Driver 17 for SQL Server",
+    ]
+
+    for candidate in preferred:
+        if candidate in available:
+            return candidate
+
+    # Fallback explicite : garde 18 en défaut si la liste est vide
+    return "ODBC Driver 18 for SQL Server"
 
 
 def get_db_connection() -> pyodbc.Connection:
     """
     Crée une connexion au Fabric Warehouse.
 
-    Authentification: ActiveDirectoryInteractive (popup Azure AD au premier appel)
+    Authentification:
+    - ActiveDirectoryPassword si DB_USER/DB_USERNAME + DB_PASSWORD sont présents
+    - sinon ActiveDirectoryInteractive
 
     Returns:
         pyodbc.Connection
@@ -34,12 +57,26 @@ def get_db_connection() -> pyodbc.Connection:
     logger.info(f"🔄 Connexion au Warehouse Fabric : {DB_SERVER} / {DB_DATABASE}")
 
     try:
+        driver = _select_odbc_driver()
+        db_user = os.getenv("DB_USER") or os.getenv("DB_USERNAME")
+        db_password = os.getenv("DB_PASSWORD")
+
+        logger.info(f"🧩 Driver ODBC sélectionné : {driver}")
+
+        auth_part = "Authentication=ActiveDirectoryInteractive;"
+        if db_user and db_password:
+            auth_part = (
+                "Authentication=ActiveDirectoryPassword;"
+                f"UID={db_user};"
+                f"PWD={db_password};"
+            )
+
         # Chaîne de connexion pour Fabric Warehouse
         conn_str = (
-            f"Driver={{ODBC Driver 17 for SQL Server}};"
+            f"Driver={{{driver}}};"
             f"Server={DB_SERVER},1433;"
             f"Database={DB_DATABASE};"
-            f"Authentication=ActiveDirectoryInteractive;"
+            f"{auth_part}"
             f"Encrypt=yes;"
             f"TrustServerCertificate=yes;"
             f"Connection Timeout=60;"
@@ -54,7 +91,7 @@ def get_db_connection() -> pyodbc.Connection:
         logger.warning(
             "💡 Assurez-vous :\n"
             "  1. DB_SERVER et DB_DATABASE sont définis dans .env\n"
-            "  2. Vous êtes authentifiés : az login\n"
-            "  3. ODBC Driver 17 for SQL Server est installé"
+            "  2. En Docker: DB_USER/DB_USERNAME + DB_PASSWORD sont définis (sinon mode interactif)\n"
+            "  3. Driver ODBC SQL Server installé (18 ou 17)"
         )
         raise

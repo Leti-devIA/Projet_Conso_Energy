@@ -13,7 +13,7 @@ from urllib.parse import quote
 
 import httpx
 
-from app.settings import (
+from app.main import (
     FABRIC_AUTOMATION_ENABLED,
     FABRIC_TENANT_ID,
     FABRIC_CLIENT_ID,

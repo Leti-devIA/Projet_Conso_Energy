@@ -7,9 +7,23 @@ WORKDIR /app
 # Dépendances système (pyodbc, curl pour healthcheck)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    gnupg \
     gcc \
     g++ \
+    unixodbc \
     unixodbc-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Ajouter clé + repo Microsoft puis installer le driver SQL Server
+RUN mkdir -p /etc/apt/keyrings \
+    && curl https://packages.microsoft.com/keys/microsoft.asc \
+    | gpg --dearmor -o /etc/apt/keyrings/microsoft.gpg
+
+RUN echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" \
+    > /etc/apt/sources.list.d/mssql-release.list
+
+RUN apt-get update \
+    && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Build context = Modeles_TimesSeries/ ──────────────────

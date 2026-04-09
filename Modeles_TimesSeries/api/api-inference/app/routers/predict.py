@@ -1,20 +1,25 @@
-import re
-import sys
-from pathlib import Path
+"""
+Routes de prédiction (pipeline ML complet).
 
+Rôle :
+------
+Ce module permet :
+1. de lancer une prédiction pour un PRM (pipeline complet)
+2. de récupérer la dernière prédiction stockée dans Fabric
+
+Pipeline de prédiction :
+-----------------------
+Dataclean → Historique → Météo future → Modèle Prophet → JSON dashboard
+"""
+
+import re
 import httpx
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.security import require_api_key
-from app.settings import CONFIG_PATH, DATACLEAN_BASE_URL, MODELS_DIR
-from app.project_paths import resolve_project_root
+from app.main import CONFIG_PATH, DATACLEAN_BASE_URL, MODELS_DIR, require_api_key
 from app.config.database import get_db_connection
 from app.repository.fabric_repository import FabricRepository
-
-# Ce path permet d'importer les modules du projet principal (src/*)
-PROJECT_ROOT = resolve_project_root(Path(__file__))
-sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.generate_climate_averages import (
     add_climate_trend,
@@ -25,65 +30,82 @@ from src.generate_climate_averages import (
 from src.predict import format_predictions_for_dashboard, predict_future
 from src.utils import load_config
 
+
+# ============================================================
+# INITIALISATION ROUTER
+# ============================================================
+
 router = APIRouter(tags=["predictions"])
 
-# PRM Enedis : 14 chiffres
+# PRM Enedis = 14 chiffres
 PRM_PATTERN = re.compile(r"^\d{14}$")
 
-# Cache mémoire des dernières prédictions par PRM.
-# Note : ce cache est perdu au redémarrage de l'API (comportement normal en mode simple).
+# Cache mémoire (non persistant)
 LATEST_PREDICTIONS: dict[str, dict] = {}
 
 
+# ============================================================
+# UTILITAIRE : récupération historique (API Dataclean)
+# ============================================================
+
 def _fetch_history_from_dataclean(prm: str) -> pd.DataFrame:
     """
-    Récupère l'historique directement depuis api-dataclean en JSON.
-    Objectif : ne plus dépendre d'un CSV intermédiaire pour prédire.
+    Récupère l'historique de consommation depuis l'API Dataclean.
+
+    Avantage :
+    - Pas de dépendance à des fichiers CSV
+    - Données toujours à jour
     """
-    source_url = f"{DATACLEAN_BASE_URL}/dataclean/allbyprm-json"
+    url = f"{DATACLEAN_BASE_URL}/dataclean/allbyprm-json"
 
     try:
         with httpx.Client(timeout=180.0) as client:
-            response = client.get(source_url, params={"prm": prm})
+            response = client.get(url, params={"prm": prm})
             response.raise_for_status()
             payload = response.json()
+
     except httpx.HTTPStatusError as exc:
         raise HTTPException(
             status_code=502,
-            detail=f"Erreur dataclean ({exc.response.status_code})"
-        ) from exc
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail="Dataclean API indisponible") from exc
+            detail=f"Erreur API Dataclean ({exc.response.status_code})"
+        )
+
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="API Dataclean indisponible")
 
     rows = payload.get("rows", [])
+
     if not rows:
-        raise HTTPException(status_code=404, detail="Aucune donnée historique trouvée côté dataclean")
+        raise HTTPException(status_code=404, detail="Aucune donnée historique trouvée")
 
     df = pd.DataFrame(rows)
 
     if "datetime" not in df.columns:
-        raise HTTPException(
-            status_code=500,
-            detail="La réponse dataclean doit contenir la colonne 'datetime'"
-        )
+        raise HTTPException(status_code=500, detail="Colonne 'datetime' manquante")
 
+    # Nettoyage des dates
     df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
-    df = df.dropna(subset=["datetime"]).sort_values("datetime").reset_index(drop=True)
+    df = df.dropna(subset=["datetime"]).sort_values("datetime")
 
     if df.empty:
-        raise HTTPException(status_code=404, detail="Historique vide après parsing des dates")
+        raise HTTPException(status_code=404, detail="Historique vide après nettoyage")
 
-    return df
+    return df.reset_index(drop=True)
 
+
+# ============================================================
+# UTILITAIRE : génération météo future
+# ============================================================
 
 def _build_future_weather_from_history(history_df: pd.DataFrame) -> pd.DataFrame:
     """
-    Génère une météo future à partir de l'historique en mémoire (sans CSV).
+    Génère une météo future synthétique à partir de l'historique.
     """
     config = load_config(str(CONFIG_PATH))
     horizon_hours = int(config.get("prediction", {}).get("horizon", 8760))
 
     meteo_moyenne = calculate_climate_averages(history_df)
+
     start_date = (history_df["datetime"].max() + pd.Timedelta(hours=1)).ceil("h")
 
     meteo_future = generate_future_meteo(
@@ -93,43 +115,60 @@ def _build_future_weather_from_history(history_df: pd.DataFrame) -> pd.DataFrame
         add_variability=True,
     )
 
+    # Ajout de réalisme climatique
     meteo_future = add_climate_trend(meteo_future, start_date)
     meteo_future = add_heatwaves(meteo_future)
+
     return meteo_future
 
 
-@router.post(
-    "/predict/prm/{prm}",
-    summary="Lancer une prédiction Prophet pour un PRM",
-    description=(
-        "Récupère l'historique depuis api-dataclean (JSON), génère la météo future, "
-        "applique le modèle Prophet et retourne directement les résultats en JSON."
-    )
-)
+# ============================================================
+# ROUTE 1 : Lancer une prédiction
+# ============================================================
+
+@router.post("/predict/prm/{prm}")
 def predict_prm(prm: str, _: str = Depends(require_api_key)) -> dict:
     """
-    Pipeline simplifié de prédiction :
-    1) Vérifier les prérequis (historique + modèle),
-    2) Générer la météo future,
-    3) Calculer la prédiction,
-    4) Formater pour le dashboard,
-    5) Retourner un JSON (sans écrire de CSV).
-    """
-    if not PRM_PATTERN.match(prm):
-        raise HTTPException(status_code=422, detail="Le PRM doit contenir exactement 14 chiffres")
+    Lance une prédiction complète pour un PRM.
 
+    Étapes :
+    1. Validation du PRM
+    2. Vérification du modèle
+    3. Récupération historique (Dataclean)
+    4. Génération météo future
+    5. Prédiction (Prophet)
+    6. Formatage pour dashboard
+    7. Retour JSON
+    """
+
+    # -------------------------------------------------------
+    # 1) Validation PRM
+    # -------------------------------------------------------
+    if not PRM_PATTERN.match(prm):
+        raise HTTPException(status_code=422, detail="PRM invalide (14 chiffres requis)")
+
+    # -------------------------------------------------------
+    # 2) Vérification modèle
+    # -------------------------------------------------------
     model_path = MODELS_DIR / f"prophet_model_{prm}_latest.pkl"
+
     if not model_path.exists():
-        raise HTTPException(status_code=404, detail="Modèle Prophet introuvable pour ce PRM")
+        raise HTTPException(status_code=404, detail="Modèle Prophet introuvable")
 
     try:
-        # 1) Historique direct depuis api-dataclean (JSON)
+        # -------------------------------------------------------
+        # 3) Historique
+        # -------------------------------------------------------
         historique_df = _fetch_history_from_dataclean(prm)
 
-        # 2) Génération météo future en mémoire
+        # -------------------------------------------------------
+        # 4) Météo future
+        # -------------------------------------------------------
         meteo_future = _build_future_weather_from_history(historique_df)
 
-        # 3) Prédiction Prophet
+        # -------------------------------------------------------
+        # 5) Prédiction ML
+        # -------------------------------------------------------
         df_pred = predict_future(
             prm=prm,
             meteo_future_df=meteo_future,
@@ -137,16 +176,23 @@ def predict_prm(prm: str, _: str = Depends(require_api_key)) -> dict:
             config_path=str(CONFIG_PATH)
         )
 
-        # 4) Format dashboard
+        # -------------------------------------------------------
+        # 6) Format dashboard
+        # -------------------------------------------------------
         output_df = format_predictions_for_dashboard(
             df_pred,
             historique_start=historique_df["datetime"].min()
         )
 
-        # 5) Réponse JSON uniquement (pas d'écriture disque)
+        # -------------------------------------------------------
+        # 7) Conversion JSON
+        # -------------------------------------------------------
         response_df = output_df.copy()
+
         if "datetime" in response_df.columns:
-            response_df["datetime"] = pd.to_datetime(response_df["datetime"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M:%S")
+            response_df["datetime"] = pd.to_datetime(
+                response_df["datetime"], errors="coerce"
+            ).dt.strftime("%Y-%m-%d %H:%M:%S")
 
         series = response_df.to_dict(orient="records")
 
@@ -159,48 +205,54 @@ def predict_prm(prm: str, _: str = Depends(require_api_key)) -> dict:
             "series": series,
         }
 
-        # Mémoriser la dernière prédiction calculée pour /predictions/.../latest
+        # Cache mémoire
         LATEST_PREDICTIONS[prm] = payload
+
+        return payload
+
     except HTTPException:
         raise
+
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Erreur de prédiction: {str(exc)}") from exc
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erreur de prédiction : {str(exc)}"
+        )
 
-    return payload
 
+# ============================================================
+# ROUTE 2 : Lire la dernière prédiction (Fabric)
+# ============================================================
 
-@router.get(
-    "/predictions/prm/{prm}/latest",
-    summary="Récupérer la dernière prédiction d'un PRM",
-    description=(
-        "Retourne la dernière prédiction stockée dans Fabric (table ia_predictions) pour un PRM."
-    )
-)
+@router.get("/predictions/prm/{prm}/latest")
 def get_latest_prediction(prm: str, _: str = Depends(require_api_key)) -> dict:
-    """Lecture des prédictions depuis Fabric pour le dashboard."""
+    """
+    Récupère la dernière prédiction depuis Fabric.
+
+    Utilisé par :
+    - dashboard
+    - visualisation des résultats
+    """
+
     if not PRM_PATTERN.match(prm):
-        raise HTTPException(status_code=422, detail="Le PRM doit contenir exactement 14 chiffres")
+        raise HTTPException(status_code=422, detail="PRM invalide")
 
     conn = None
+
     try:
         conn = get_db_connection()
         repo = FabricRepository(conn)
+
         series = repo.get_latest_predictions_series(prm)
 
         if series is None:
-            raise HTTPException(
-                status_code=503,
-                detail="Impossible de lire ia_predictions dans Fabric"
-            )
+            raise HTTPException(status_code=503, detail="Fabric indisponible")
 
         if not series:
-            raise HTTPException(
-                status_code=404,
-                detail="Aucune prédiction trouvée dans Fabric pour ce PRM"
-            )
+            raise HTTPException(status_code=404, detail="Aucune prédiction trouvée")
 
         return {
-            "message": "Prédiction lue depuis Fabric",
+            "message": "Prédiction récupérée depuis Fabric",
             "prm": prm,
             "rows": len(series),
             "start": series[0]["datetime"],
@@ -208,12 +260,18 @@ def get_latest_prediction(prm: str, _: str = Depends(require_api_key)) -> dict:
             "series": series,
             "source": "fabric",
         }
+
     except HTTPException:
         raise
+
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Erreur Fabric: {str(exc)}") from exc
+        raise HTTPException(
+            status_code=503,
+            detail=f"Erreur Fabric : {str(exc)}"
+        )
+
     finally:
-        if conn is not None:
+        if conn:
             try:
                 conn.close()
             except Exception:

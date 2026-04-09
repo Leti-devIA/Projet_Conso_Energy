@@ -61,15 +61,32 @@ class FabricRepository:
     def get_latest_predictions_series(self, prm: str) -> Optional[List[Dict]]:
         """Lit la dernière série de prédictions d'un PRM depuis Fabric.
 
-        Attendu : table `ia_predictions` avec colonnes de base :
-        - PRM
-        - DATETIME_PRED
-        - PUISSANCE_MOY_HEURE_PRED
-        - DATE_GENERATION (optionnel mais recommandé)
+        Compatibilité schéma :
+        - Nouveau schéma Fabric : DATE_HEURE / VALEUR_PREDITE / ID_RUN
+        - Ancien schéma : DATETIME_PRED / PUISSANCE_MOY_HEURE_PRED / DATE_GENERATION
         """
         logger.info(f"📖 Lecture prédictions Fabric pour {prm}...")
 
         sql_candidates = [
+            """
+            SELECT
+                PRM,
+                DATE_HEURE AS DATETIME_PRED,
+                VALEUR_PREDITE AS PUISSANCE_MOY_HEURE_PRED,
+                VALEUR_PRED_BASSE AS PUISSANCE_MOY_HEURE_PRED_LOWER,
+                VALEUR_PRED_HAUTE AS PUISSANCE_MOY_HEURE_PRED_UPPER,
+                NULL AS JOURS_DEPUIS_DEBUT,
+                NULL AS ANNEE,
+                CAST(ID_RUN AS VARCHAR(100)) AS DATE_GENERATION
+            FROM ia_predictions
+            WHERE PRM = ?
+              AND ID_RUN = (
+                    SELECT MAX(ID_RUN)
+                    FROM ia_predictions
+                    WHERE PRM = ?
+              )
+            ORDER BY DATE_HEURE
+            """,
             """
             SELECT
                 PRM,
@@ -110,7 +127,7 @@ class FabricRepository:
 
         for sql in sql_candidates:
             try:
-                params = (prm, prm) if "MAX(DATE_GENERATION)" in sql else (prm,)
+                params = (prm, prm) if "MAX(" in sql else (prm,)
                 self.cursor.execute(sql, params)
                 rows = self.cursor.fetchall()
                 break

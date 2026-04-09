@@ -18,7 +18,11 @@ class DatabaseManager:
                 try:
                     self._connection.execute("SELECT 1")
                     return self._connection
-                except:
+                except Exception:
+                    try:
+                        self._connection.close()
+                    except Exception:
+                        pass
                     self._connection = None
 
             server = os.getenv("DB_SERVER")
@@ -53,9 +57,7 @@ class DatabaseManager:
 
     async def get_connection(self) -> Optional[pyodbc.Connection]:
         """Retourne une connexion active, réutilisée si déjà existante"""
-        if not self._connection:
-            await self.connect()
-        return self._connection
+        return await self.connect()
 
     async def close(self):
         """Ferme la connexion"""
