@@ -2,7 +2,7 @@ from fastapi import APIRouter, Query, HTTPException
 from fastapi.responses import StreamingResponse
 from app.config.database import get_database_connection, close_database_connection
 from app.services.csv_export import stream_rows_to_csv
-from app.repository.data_repository import get_rows_by_prm, get_all_previsions_meteo, get_all_sites, get_all_prix_spot
+from app.repository.data_repository import get_rows_by_prm, get_rows_by_prms, get_all_previsions_meteo, get_all_sites, get_all_prix_spot
 import asyncio
 import traceback
 import pyodbc
@@ -132,6 +132,55 @@ async def get_all_by_prm_json(prm: str = Query(...)):
         print(f"❌ ERREUR COMPLÈTE: {type(e).__name__}: {str(e)}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Erreur lors de l'export JSON: {str(e)}")
+
+
+@router.get(
+    "/allbyprm-json-batch",
+    summary="Récupération JSON de l'historique pour plusieurs PRM en un appel",
+    description=(
+        "Retourne les données historiques de plusieurs PRM au format JSON. "
+        "Exemple d'appel : /dataclean/allbyprm-json-batch?prms=123&prms=456"
+    )
+)
+async def get_all_by_prms_json(prms: list[str] = Query(...)):
+    """Version batch de /allbyprm-json pour éviter un appel API par PRM."""
+    normalized_prms = [str(prm).strip() for prm in prms if str(prm).strip()]
+    normalized_prms = list(dict.fromkeys(normalized_prms))
+
+    if not normalized_prms:
+        raise HTTPException(status_code=400, detail="Le paramètre 'prms' est obligatoire.")
+
+    print(f"📥 Requête JSON batch reçue pour {len(normalized_prms)} PRM(s)")
+
+    try:
+        loop = asyncio.get_event_loop()
+        cursor, columns = await _execute_query_with_retry(get_rows_by_prms, normalized_prms)
+
+        rows = await loop.run_in_executor(None, cursor.fetchall)
+        records = []
+
+        for row in rows:
+            item = {}
+            for idx, col in enumerate(columns):
+                value = row[idx]
+                if hasattr(value, "isoformat"):
+                    value = value.isoformat()
+                item[col] = value
+            records.append(item)
+
+        print(f"✅ {len(records)} ligne(s) batch retournée(s) en JSON")
+        return {
+            "prms": normalized_prms,
+            "count": len(records),
+            "rows": records,
+        }
+
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        print(f"❌ ERREUR COMPLÈTE BATCH: {type(e).__name__}: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Erreur lors de l'export JSON batch: {str(e)}")
 
 
 @router.get(

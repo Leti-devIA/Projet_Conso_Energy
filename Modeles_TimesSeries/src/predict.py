@@ -54,48 +54,75 @@ def load_prophet_model(model_dir="models/saved", prm=None):
 def build_future_from_features(df_features, meteo_future_df, model):
     """
     Prépare le DataFrame futur pour Prophet à partir des features pré-calculées.
-    - Recycle les colonnes de feature_engineering_pipeline
-    - Ajoute météo future et jours fériés
+
+    Stratégie lags :
+    - lag_24  : les 24 premières heures futures → valeurs historiques réelles (j-1)
+                au-delà → recyclage saisonnier (même heure, j-7 dans l'historique)
+    - lag_168 : les 168 premières heures futures → valeurs historiques réelles (j-7)
+                au-delà → recyclage saisonnier (même heure, j-7 dans l'historique)
+    - Rolling/std/min/max : exclus (non fiables en prévision future)
     """
     regressors = list(model.extra_regressors.keys())
 
     last_datetime = df_features["datetime"].max()
     horizon = len(meteo_future_df)
-    future_datetimes = pd.date_range(start=last_datetime + pd.Timedelta(hours=1),
-                                     periods=horizon, freq='H')
+    future_datetimes = pd.date_range(
+        start=last_datetime + pd.Timedelta(hours=1),
+        periods=horizon,
+        freq='h'
+    )
 
-    # DataFrame futur
     df_future = pd.DataFrame({"ds": future_datetimes})
 
     # ── Regressors cycliques
-    cyclic = ['heure_sin','heure_cos','jour_sin','jour_cos','is_weekend']
+    cyclic = ['heure_sin', 'heure_cos', 'jour_sin', 'jour_cos', 'is_weekend']
     for feat in cyclic:
         if feat in regressors:
-            # Recalcul cyclique pour les dates futures
             if feat == 'heure_sin':
-                df_future[feat] = np.sin(2*np.pi*df_future['ds'].dt.hour/24)
+                df_future[feat] = np.sin(2 * np.pi * df_future['ds'].dt.hour / 24)
             elif feat == 'heure_cos':
-                df_future[feat] = np.cos(2*np.pi*df_future['ds'].dt.hour/24)
+                df_future[feat] = np.cos(2 * np.pi * df_future['ds'].dt.hour / 24)
             elif feat == 'jour_sin':
-                df_future[feat] = np.sin(2*np.pi*df_future['ds'].dt.dayofweek/7)
+                df_future[feat] = np.sin(2 * np.pi * df_future['ds'].dt.dayofweek / 7)
             elif feat == 'jour_cos':
-                df_future[feat] = np.cos(2*np.pi*df_future['ds'].dt.dayofweek/7)
+                df_future[feat] = np.cos(2 * np.pi * df_future['ds'].dt.dayofweek / 7)
             elif feat == 'is_weekend':
                 df_future[feat] = (df_future['ds'].dt.dayofweek >= 5).astype(int)
 
     # ── Météo future
     meteo_future_df = meteo_future_df.copy()
-    meteo_future_df['ds'] = pd.to_datetime(meteo_future_df['datetime']).dt.round('H')
+    meteo_future_df['ds'] = pd.to_datetime(meteo_future_df['datetime']).dt.round('h')
     meteo_future_df = meteo_future_df.drop_duplicates(subset=['ds']).set_index('ds')
 
-    for col in ['temperature','humidite','vitesse_vent','couverture_nuages']:
+    for col in ['temperature', 'humidite', 'vitesse_vent', 'couverture_nuages']:
         if col in regressors:
-            df_future[col] = df_future['ds'].map(meteo_future_df[col])
-            n_missing = df_future[col].isna().sum()
-            if n_missing > 0:
-                print(f"⚠️ {n_missing} NaN détectés pour '{col}' → interpolation linéaire")
-                df_future[col] = df_future[col].interpolate(method='linear')
-                df_future[col] = df_future[col].fillna(method='bfill').fillna(method='ffill')
+            if col in meteo_future_df.columns:
+                df_future[col] = df_future['ds'].map(meteo_future_df[col])
+                n_missing = df_future[col].isna().sum()
+                if n_missing > 0:
+                    print(f"⚠️ {n_missing} NaN pour '{col}' → interpolation")
+                    df_future[col] = df_future[col].interpolate(method='linear')
+                    df_future[col] = df_future[col].ffill().bfill()
+            elif col in df_features.columns:
+                hist_mean = float(df_features[col].dropna().mean())
+                print(f"⚠️ Colonne météo '{col}' absente du futur → moyenne historique ({hist_mean:.2f})")
+                df_future[col] = hist_mean
+            else:
+                print(f"⚠️ Colonne météo '{col}' absente partout → 0")
+                df_future[col] = 0.0
+
+    # ── Interaction météo (temp_x_heure_sin, temp_x_heure_cos)
+    if 'temp_x_heure_sin' in regressors and 'temperature' in df_future.columns:
+        df_future['temp_x_heure_sin'] = df_future['temperature'] * df_future['heure_sin']
+    if 'temp_x_heure_cos' in regressors and 'temperature' in df_future.columns:
+        df_future['temp_x_heure_cos'] = df_future['temperature'] * df_future['heure_cos']
+
+    # ── Précipitation (pas dans météo future générée, on met 0)
+    if 'precipitation' in regressors:
+        if 'precipitation' in meteo_future_df.columns:
+            df_future['precipitation'] = df_future['ds'].map(meteo_future_df['precipitation']).fillna(0.0)
+        elif 'precipitation' not in df_future.columns:
+            df_future['precipitation'] = 0.0
 
     # ── Jours fériés
     years = df_future['ds'].dt.year.unique()
@@ -105,17 +132,74 @@ def build_future_from_features(df_features, meteo_future_df, model):
     if 'jour_ferie' in regressors:
         df_future['jour_ferie'] = df_future['ds'].dt.date.isin(ferie_set).astype(int)
 
-    # ── Cap/Floor logistic si nécessaire
+    # ── Lags : stratégie par profil horaire moyen (robuste sur long horizon)
+    lag_cols = [c for c in regressors if c.startswith('puissance_lag_')]
+    if lag_cols:
+        hist = df_features[['datetime', 'puissance_moy_heure']].copy()
+        hist['datetime'] = pd.to_datetime(hist['datetime'])
+        hist = hist.set_index('datetime')['puissance_moy_heure']
+
+        # Profil de référence : moyenne par (heure, jour_semaine) sur l'historique
+        # On exclut les 30 derniers jours pour éviter les pics atypiques récents
+        hist_stable = hist.iloc[:-24*30] if len(hist) > 24*30 else hist
+        profile = (
+            hist_stable
+            .groupby([hist_stable.index.hour, hist_stable.index.dayofweek])
+            .mean()
+        )
+        # profile.index = (hour, dayofweek)
+
+        for col in lag_cols:
+            lag = int(col.split('_')[-1])
+
+            values = []
+            for future_dt in df_future['ds']:
+                target_dt = future_dt - pd.Timedelta(hours=lag)
+
+                if target_dt in hist.index:
+                    # Dans l'historique réel → valeur exacte
+                    values.append(hist[target_dt])
+                else:
+                    # Hors historique → profil moyen (heure, dow) de référence
+                    key = (future_dt.hour, future_dt.dayofweek)
+                    if key in profile.index:
+                        values.append(profile[key])
+                    else:
+                        values.append(float(hist_stable.mean()))
+
+            df_future[col] = values
+            n_nan = df_future[col].isna().sum()
+            print(f"   ✅ {col} | NaN={n_nan} | "
+                f"moy={df_future[col].mean():.0f} | "
+                f"ex={df_future[col].head(3).values.round(0)}")
+
+    # ── Colonnes rolling/std/min/max : si présentes dans regressors, on met la moyenne historique
+    # (ne pas mettre 0 car ça biaiserait fortement le modèle)
+    stat_cols = [c for c in regressors if any(k in c for k in ['roll', 'std_', 'min_', 'max_'])]
+    if stat_cols:
+        hist_target = df_features['puissance_moy_heure']
+        for col in stat_cols:
+            hist_mean = float(hist_target.mean())
+            df_future[col] = hist_mean
+            print(f"   ℹ️  {col} → moyenne historique ({hist_mean:.0f} W)")
+
+    # ── Cap/Floor logistic
     if hasattr(model, 'growth') and model.growth == 'logistic':
-        df_future['cap'] = df_features['cap'].iloc[-1]
+        df_future['cap']   = df_features['cap'].iloc[-1]
         df_future['floor'] = df_features['floor'].iloc[-1]
 
-    # ── Remplir les éventuels NaN
+    # ── Colonnes manquantes → 0 en dernier recours
     for r in regressors:
         if r not in df_future.columns:
+            print(f"   ⚠️  {r} manquant → 0 (vérifier)")
             df_future[r] = 0
 
-    return df_future
+    ordered_cols = ['ds']
+    if hasattr(model, 'growth') and model.growth == 'logistic':
+        ordered_cols += [c for c in ['cap', 'floor'] if c in df_future.columns]
+    ordered_cols += regressors
+
+    return df_future[ordered_cols].copy()
 
 
 # ============================================================
@@ -133,7 +217,7 @@ def predict_future(prm, meteo_future_df, model_dir="models/saved", config_path="
     print(f"📋 Regressors attendus : {regressors}")
 
     # ── Charger les features calculées pour ce PRM
-    df_features, _ = feature_engineering_pipeline(prm, source='csv', config_path=config_path)
+    df_features, _ = feature_engineering_pipeline(prm=prm, source='csv', config_path=config_path)
 
     # ── Construire le DataFrame futur
     df_future = build_future_from_features(df_features, meteo_future_df, model)

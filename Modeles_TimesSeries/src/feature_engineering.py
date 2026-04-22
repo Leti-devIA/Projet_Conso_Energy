@@ -16,6 +16,16 @@ from .data_loader import get_data_loader
 import argparse
 from .utils import load_config
 
+DEFAULT_LAGS = [1, 2, 3, 24, 48, 168]
+DEFAULT_ROLLING_WINDOWS = [3, 6, 12, 24]
+FUTURE_SAFE_LAGS = [24, 168]
+FUTURE_UNSAFE_PREFIXES = (
+    'puissance_roll_',
+    'puissance_std_',
+    'puissance_min_',
+    'puissance_max_',
+)
+
 # ===================================================
 # CONFIGURATION
 # ===================================================
@@ -39,7 +49,7 @@ def create_temporal_features(df):
     return df
 
 
-def create_lag_features(df, target_col, lags=[1,2,3,24,48]):
+def create_lag_features(df, target_col, lags=DEFAULT_LAGS):
     df = df.copy()
     prefix = 'puissance'
     for lag in lags:
@@ -47,7 +57,7 @@ def create_lag_features(df, target_col, lags=[1,2,3,24,48]):
     return df
 
 
-def create_rolling_features(df, target_col, windows=[3,6,12,24]):
+def create_rolling_features(df, target_col, windows=DEFAULT_ROLLING_WINDOWS):
     df = df.copy()
     prefix = 'puissance'
     for window in windows:
@@ -204,7 +214,6 @@ if __name__ == "__main__":
         )
 
     # 🔹 Feature engineering
-    from feature_engineering import feature_engineering_pipeline
     df_fe, cfg = feature_engineering_pipeline(df=df, prm=prm, config_path=config_path)
 
     print(f"\n📊 Shape finale après feature engineering : {df_fe.shape}")

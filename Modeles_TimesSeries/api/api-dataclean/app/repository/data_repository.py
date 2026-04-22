@@ -5,8 +5,28 @@ def get_rows_by_prm(connection, prm: str):
         SELECT *
         FROM dbo.ENEDIS_METEO_CLEAN
         WHERE prm = ?
+        ORDER BY datetime
     """
     cursor.execute(query, (prm,))
+
+    columns = [col[0] for col in cursor.description]
+    return cursor, columns
+
+
+def get_rows_by_prms(connection, prms: list[str]):
+    cursor = connection.cursor()
+
+    if not prms:
+        raise ValueError("La liste des PRM ne peut pas être vide")
+
+    placeholders = ", ".join(["?"] * len(prms))
+    query = f"""
+        SELECT *
+        FROM dbo.ENEDIS_METEO_CLEAN
+        WHERE prm IN ({placeholders})
+        ORDER BY prm, datetime
+    """
+    cursor.execute(query, tuple(prms))
 
     columns = [col[0] for col in cursor.description]
     return cursor, columns

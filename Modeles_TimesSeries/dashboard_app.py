@@ -43,6 +43,15 @@ W_TO_KWH = 1 / 1_000          # W (sur 1 h) → kWh
 W_TO_MWH = 1 / 1_000_000      # W (sur 1 h) → MWh
 
 
+HIST_BATCH_CHUNK_SIZE = int(os.getenv("HIST_BATCH_CHUNK_SIZE", "4"))
+HIST_BATCH_READ_TIMEOUT = float(os.getenv("HIST_BATCH_READ_TIMEOUT", "120"))
+
+
+def _chunked(items: list[str], size: int):
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
+
+
 @st.cache_data
 def load_sites() -> pd.DataFrame:
     """Charge les sites depuis l'API inference (/models/list) avec fallback CSV."""
@@ -74,10 +83,10 @@ def load_sites() -> pd.DataFrame:
                     df["site_label"] = "Site " + df["prm"]
                 return df
 
-        st.warning(f"⚠️ API /models/list indisponible ({response.status_code}), fallback CSV...")
+        pass
 
     except Exception as e:
-        st.warning(f"⚠️ Erreur charge sites API: {str(e)}, fallback CSV...")
+        pass
 
     return _load_sites_csv()
 
@@ -93,7 +102,6 @@ def _load_sites_csv() -> pd.DataFrame:
         df["site_label"] = df["ville"].astype(str) + " (" + df["prm"] + ")"
         return df
     except Exception as e:
-        st.warning(f"⚠️ Erreur charge CSV sites: {str(e)}")
         return pd.DataFrame(columns=["prm", "ville", "id_site"])
 
 
@@ -152,16 +160,7 @@ def load_predictions() -> pd.DataFrame:
                 failed_prms.append((prm, -1))
                 continue
 
-        if failed_prms:
-            code_counts: dict[str, int] = {}
-            for _, status_code in failed_prms:
-                code_key = "exception" if status_code == -1 else str(status_code)
-                code_counts[code_key] = code_counts.get(code_key, 0) + 1
-            summary = ", ".join([f"{count}x {code}" for code, count in sorted(code_counts.items())])
-            st.info(f"ℹ️ PRM sans prédictions Fabric: {len(failed_prms)} ({summary})")
-
         if not frames:
-            st.warning("Aucune prédiction disponible dans Fabric. Lance le notebook Fabric pour alimenter ia_predictions.")
             return pd.DataFrame()
 
         out = pd.concat(frames, ignore_index=True)
@@ -175,7 +174,6 @@ def load_predictions() -> pd.DataFrame:
         return out
 
     except Exception as e:
-        st.warning(f"⚠️ Erreur chargement prédictions Fabric/API: {str(e)}")
         return pd.DataFrame()
 
 
@@ -220,74 +218,137 @@ def _load_predictions_csv() -> pd.DataFrame:
 
 @st.cache_data
 def load_historical_data() -> pd.DataFrame:
-    """Charge l'historique depuis l'API dataclean (/dataclean/allbyprm-json) avec fallback CSV."""
+    """Charge l'historique depuis l'API dataclean batch avec fallback séquentiel puis CSV."""
     try:
         sites_df = load_sites()
         if sites_df.empty:
-            st.warning("⚠️ Aucun site configuré")
             return pd.DataFrame()
 
-        frames = []
+        prms = sites_df["prm"].astype(str).tolist()
+        frames: list[pd.DataFrame] = []
 
-        for _, row in sites_df.iterrows():
-            prm = str(row["prm"])
-            try:
-                # Récupère l'historique depuis API dataclean
-                with httpx.Client(timeout=120.0) as client:
-                    hist_response = client.get(
-                        f"{API_DATACLEAN_URL}/dataclean/allbyprm-json",
-                        params={"prm": prm}
+        timeout = httpx.Timeout(connect=10.0, read=HIST_BATCH_READ_TIMEOUT, write=30.0, pool=10.0)
+
+        with httpx.Client(timeout=timeout) as client:
+            for prms_chunk in _chunked(prms, HIST_BATCH_CHUNK_SIZE):
+                try:
+                    resp = client.get(
+                        f"{API_DATACLEAN_URL}/dataclean/allbyprm-json-batch",
+                        params=[("prms", p) for p in prms_chunk],  # GET multi-param
                     )
+                    if resp.status_code != 200:
+                        st.warning(f"Batch chunk KO ({resp.status_code}) pour {len(prms_chunk)} PRM")
+                        continue
 
-                if hist_response.status_code == 200:
-                    hist_data = hist_response.json()
-                    rows = hist_data.get("rows", [])
-
+                    rows = resp.json().get("rows", [])
                     if rows:
-                        df = pd.DataFrame(rows)
-
-                        # Parser la colonne datetime
-                        if "datetime" in df.columns:
-                            df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
-                        else:
-                            continue
-
-                        # Normaliser puissance (si en W, convertir en kW)
-                        if "puissance_moy_heure" in df.columns:
-                            df["puissance_kw"] = df["puissance_moy_heure"] / 1_000
-                        elif "puissance" in df.columns:
-                            df["puissance_kw"] = df["puissance"] / 1_000
-                        elif "puissance_kw" not in df.columns:
-                            continue
-
-                        df["prm"] = prm
-                        df = df[["prm", "datetime", "puissance_kw"]].copy()
-                        frames.append(df)
-                        st.success(f"✅ Historique chargé pour {prm}")
-                else:
-                    st.warning(f"⚠️ API dataclean indisponible pour {prm} ({hist_response.status_code})")
-
-            except Exception as e:
-                st.warning(f"⚠️ Erreur historique {prm}: {str(e)}")
-                continue
+                        frames.append(pd.DataFrame(rows))
+                except Exception as e:
+                    st.warning(f"Chunk en erreur ({len(prms_chunk)} PRM): {e}")
 
         if not frames:
-            st.info("ℹ️ Aucun historique disponible via l'API, fallback CSV...")
             return _load_historical_data_csv()
 
         out = pd.concat(frames, ignore_index=True)
+
+        if "datetime" not in out.columns:
+            return _load_historical_data_csv()
+        out["datetime"] = pd.to_datetime(out["datetime"], errors="coerce")
+
+        if "puissance_moy_heure" in out.columns:
+            out["puissance_kw"] = out["puissance_moy_heure"] / 1_000
+        elif "puissance" in out.columns:
+            out["puissance_kw"] = out["puissance"] / 1_000
+        elif "puissance_kw" not in out.columns:
+            return _load_historical_data_csv()
+
+        if "prm" not in out.columns:
+            return _load_historical_data_csv()
+
+        out = out[["prm", "datetime", "puissance_kw"]].copy()
         out["prm"] = out["prm"].astype(str)
         out["data_type"] = "Historique"
 
-        # Ajouter site_label en fusionnant avec sites
-        sites_df = load_sites()[["prm", "site_label"]]
-        out = out.merge(sites_df, on="prm", how="left")
-
+        sites_map = load_sites()[["prm", "site_label"]]
+        out = out.merge(sites_map, on="prm", how="left")
         return out
 
-    except Exception as e:
-        st.warning(f"⚠️ Erreur chargement historique API: {str(e)}, fallback CSV...")
+    except Exception:
         return _load_historical_data_csv()
+
+        # # 2) Fallback séquentiel si endpoint batch indisponible
+        # if out.empty:
+        #     frames = []
+        #     for prm in prms:
+        #         try:
+        #             with httpx.Client(timeout=120.0) as client:
+        #                 hist_response = client.get(
+        #                     f"{API_DATACLEAN_URL}/dataclean/allbyprm-json",
+        #                     params={"prm": prm}
+        #                 )
+
+        #             if hist_response.status_code == 200:
+        #                 hist_data = hist_response.json()
+        #                 rows = hist_data.get("rows", [])
+        #                 if rows:
+        #                     df = pd.DataFrame(rows)
+        #                     df["prm"] = prm
+        #                     frames.append(df)
+        #         except Exception:
+        #             continue
+
+            # if frames:
+            #     out = pd.concat(frames, ignore_index=True)
+
+        # if out.empty:
+        #     return _load_historical_data_csv()
+
+        # if "datetime" not in out.columns:
+        #     return _load_historical_data_csv()
+        # out["datetime"] = pd.to_datetime(out["datetime"], errors="coerce")
+
+        # if "puissance_moy_heure" in out.columns:
+        #     out["puissance_kw"] = out["puissance_moy_heure"] / 1_000
+        # elif "puissance" in out.columns:
+        #     out["puissance_kw"] = out["puissance"] / 1_000
+        # elif "puissance_kw" not in out.columns:
+        #     return _load_historical_data_csv()
+
+        # if "prm" not in out.columns:
+        #     return _load_historical_data_csv()
+
+        # out = out[["prm", "datetime", "puissance_kw"]].copy()
+        # out["prm"] = out["prm"].astype(str)
+        # out["data_type"] = "Historique"
+
+        # # Ajouter site_label en fusionnant avec sites
+        # sites_df = load_sites()[["prm", "site_label"]]
+        # out = out.merge(sites_df, on="prm", how="left")
+
+        # return out
+
+    except Exception as e:
+        return _load_historical_data_csv()
+
+
+def load_dashboard_data_with_progress() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Charge les jeux de données principaux avec une barre de progression."""
+    progress = st.progress(0, text="Chargement des données (0/4) : sites...")
+
+    sites_df = load_sites()
+    progress.progress(25, text="Chargement des données (1/4) : prix...")
+
+    prices_df = load_prices()
+    progress.progress(50, text="Chargement des données (2/4) : prédictions...")
+
+    preds_df = load_predictions()
+    progress.progress(75, text="Chargement des données (3/4) : historique...")
+
+    hist_df = load_historical_data()
+    progress.progress(100, text="Chargement terminé.")
+    progress.empty()
+
+    return sites_df, prices_df, preds_df, hist_df
 
 
 def _load_historical_data_csv() -> pd.DataFrame:
@@ -670,10 +731,7 @@ if current_role == "admin":
 
 st.title("Dashboard previsions conso et prix")
 
-sites_df = load_sites()
-prices_df = load_prices()
-preds_df = load_predictions()
-hist_df = load_historical_data()
+sites_df, prices_df, preds_df, hist_df = load_dashboard_data_with_progress()
 
 if preds_df.empty:
     st.warning("Aucune prediction disponible depuis Fabric.")
@@ -772,7 +830,7 @@ elif len(selected_sites) == 1:
         m_cols[0].metric(
             label="MAE (W)",
             value=f"{mae:,.0f}" if mae is not None else "N/A",
-            help="Mean Absolute Error — erreur absolue moyenne entre la prévision et la consommation réelle. Plus la valeur est basse, meilleur est le modèle.",
+            help="Mean Absolute Error — erreur absolue moyenne entre la prédiction et la consommation réelle. Plus la valeur est basse, meilleur est le modèle.",
         )
         m_cols[1].metric(
             label="RMSE (W)",

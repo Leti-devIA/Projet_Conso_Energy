@@ -21,6 +21,7 @@ préprocessing -> features -> entraînement -> évaluation -> sauvegarde.
 """
 
 import argparse
+import os
 import pandas as pd
 import numpy as np
 import pickle
@@ -30,8 +31,12 @@ from datetime import datetime
 from .data_loader import get_data_loader
 from .utils import load_config, detect_prms
 from .preprocessing import preprocess_pipeline
-from .feature_engineering import feature_engineering_pipeline, save_features
+from .feature_engineering import (
+    feature_engineering_pipeline,
+    save_features,
+)
 from prophet import Prophet
+from prophet.make_holidays import make_holidays_df
 from prophet.diagnostics import cross_validation, performance_metrics
 
 
@@ -46,7 +51,7 @@ except ImportError:
 # ===================================================
 config = load_config("config/config.yaml")
 
-
+holidays = make_holidays_df([2023, 2024, 2025, 2026], country="FR")
 
 # ===================================================
 # FONCTION DE PRÉPARATION DES DONNÉES
@@ -82,7 +87,25 @@ def prepare_data_for_prophet(df, target_col, config):
     if missing:
         print(f"   ⚠️  Regressors absents : {missing}")
 
-    return df[available_cols]
+    extra_feature_cols = [
+        c for c in df.columns
+        if c.startswith('puissance_lag_') or c.startswith('puissance_roll_')
+        or c.startswith('puissance_std_') or c.startswith('puissance_min_')
+        or c.startswith('puissance_max_')
+    ]
+    retained_extra = [c for c in regressors if c.startswith('puissance_')]
+    excluded_extra = [c for c in extra_feature_cols if c not in retained_extra]
+
+    if retained_extra:
+        print(f"   Regressors extra retenus : {retained_extra}")
+
+    if regressors:
+        nan_counts = df[regressors].isna().sum()
+        nan_regressors = nan_counts[nan_counts > 0]
+        if not nan_regressors.empty:
+            print(f"   ⚠️  NaN dans les regressors : {nan_regressors.to_dict()}")
+
+    return df[available_cols].copy()
 
 
 
@@ -107,12 +130,14 @@ def evaluate_model(model, df_val):
     mae  = float(np.mean(np.abs(y_true - y_pred)))
     rmse = float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
     mape = float(np.mean(np.abs((y_true - y_pred) / (y_true + 1e-8))) * 100)
+    abs_y = float(np.abs(y_true).sum())
+    wape = float("nan") if abs_y == 0 else float(np.abs(y_true - y_pred).sum() / abs_y * 100)
 
     ss_res = np.sum((y_true - y_pred) ** 2)
     ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
     r2 = float(1 - ss_res / ss_tot) if ss_tot > 0 else 0.0
 
-    return {"mae": mae, "rmse": rmse, "mape": mape, "r2": r2}
+    return {"mae": mae, "rmse": rmse, "mape": mape, "wape": wape, "r2": r2}
 
 
 
@@ -208,18 +233,28 @@ def build_prophet_model(config, prm=None):
         if overrides:
             print(f"   ⚙️  Overrides appliqués pour {prm} : {overrides}")
 
-    growth = overrides.get("growth", cfg.get("growth", "linear"))
-    changepoint_prior_scale = overrides.get("changepoint_prior_scale", cfg["changepoint_prior_scale"])
-    seasonality_prior_scale = overrides.get("seasonality_prior_scale", cfg["seasonality_prior_scale"])
-    seasonality_mode = overrides.get("seasonality_mode", cfg["seasonality_mode"])
-    fourier_order_daily  = overrides.get("fourier_order_daily",  cfg.get("fourier_order_daily",  10))
-    fourier_order_weekly = overrides.get("fourier_order_weekly", cfg.get("fourier_order_weekly",  5))
-    fourier_order_yearly = overrides.get("fourier_order_yearly", cfg.get("fourier_order_yearly", 10))
-    holidays_prior_scale = overrides.get("holidays_prior_scale", cfg.get("holidays_prior_scale", 10))
-    n_changepoints = overrides.get("n_changepoints", cfg.get("n_changepoints", 25))
-    changepoint_range = overrides.get("changepoint_range", cfg.get("changepoint_range", 0.8))
+    def _cfg_value(*keys, default=None):
+        for key in keys:
+            if key in overrides:
+                return overrides[key]
+        for key in keys:
+            if key in cfg:
+                return cfg[key]
+        return default
+
+    growth = _cfg_value("growth", default="linear")
+    changepoint_prior_scale = _cfg_value("changepoint_prior_scale", default=cfg["changepoint_prior_scale"])
+    seasonality_prior_scale = _cfg_value("seasonality_prior_scale", default=cfg["seasonality_prior_scale"])
+    seasonality_mode = _cfg_value("seasonality_mode", default=cfg["seasonality_mode"])
+    fourier_order_daily = _cfg_value("daily_fourier_order", "fourier_order_daily", default=10)
+    fourier_order_weekly = _cfg_value("weekly_fourier_order", "fourier_order_weekly", default=5)
+    fourier_order_yearly = _cfg_value("yearly_fourier_order", "fourier_order_yearly", default=10)
+    holidays_prior_scale = _cfg_value("holidays_prior_scale", default=cfg.get("holidays_prior_scale", 10))
+    n_changepoints = _cfg_value("n_changepoints", default=cfg.get("n_changepoints", 25))
+    changepoint_range = _cfg_value("changepoint_range", default=cfg.get("changepoint_range", 0.8))
 
     model = Prophet(
+        holidays=holidays,
         yearly_seasonality=False,
         weekly_seasonality=False,
         daily_seasonality=False,
@@ -238,6 +273,39 @@ def build_prophet_model(config, prm=None):
     model.add_seasonality(name="yearly", period=365.25, fourier_order=fourier_order_yearly)
 
     return model
+
+
+def build_fit_options(config, prm=None):
+    """Construit des options pour model.fit; mode avancé activé uniquement si demandé."""
+    prophet_cfg = config.get("prophet", {})
+    fit_cfg = prophet_cfg.get("fit", {}) or {}
+    fit_enabled = bool(fit_cfg.get("enabled", False))
+
+    overrides = {}
+    if prm and "site_overrides" in config:
+        overrides = config["site_overrides"].get(str(prm), {}) or {}
+
+    fit_algorithm = overrides.get("fit_algorithm", fit_cfg.get("algorithm", "LBFGS"))
+    fit_iter = int(overrides.get("fit_iter", fit_cfg.get("iter", 200)))
+    fit_seed = int(overrides.get("fit_seed", fit_cfg.get("seed", 42)))
+    fit_timeout = fit_cfg.get("timeout", None)
+
+    output_dir = None
+    if fit_enabled and fit_cfg.get("output_dir"):
+        output_root = Path(fit_cfg.get("output_dir"))
+        output_root.mkdir(parents=True, exist_ok=True)
+        output_dir_path = output_root / f"prm_{prm}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        output_dir_path.mkdir(parents=True, exist_ok=True)
+        output_dir = str(output_dir_path)
+
+    return {
+        "enabled": fit_enabled,
+        "algorithm": str(fit_algorithm),
+        "iter": fit_iter,
+        "seed": fit_seed,
+        "timeout": fit_timeout,
+        "output_dir": output_dir,
+    }
 
 
 # ============================================================
@@ -266,6 +334,17 @@ def save_model(model, config, metrics, prm):
         "metrics":          metrics,
         "regressors":       list(model.extra_regressors.keys()),
         "seasonality_mode": model.seasonality_mode,
+        "growth":           getattr(model, "growth", None),
+        "hyperparameters": {
+            "changepoint_prior_scale": model.changepoint_prior_scale,
+            "seasonality_prior_scale": model.seasonality_prior_scale,
+            "holidays_prior_scale": model.holidays_prior_scale,
+            "n_changepoints": model.n_changepoints,
+            "changepoint_range": model.changepoint_range,
+            "daily_fourier_order": model.seasonalities.get("daily", {}).get("fourier_order"),
+            "weekly_fourier_order": model.seasonalities.get("weekly", {}).get("fourier_order"),
+            "yearly_fourier_order": model.seasonalities.get("yearly", {}).get("fourier_order"),
+        },
     }
     metrics_path = save_dir / f"prophet_metrics_{prm}.json"
     with open(metrics_path, "w", encoding="utf-8") as f:
@@ -283,7 +362,6 @@ def train_one_site(data_path, config, prm, config_path):
     """Entraîne et sauvegarde un modèle Prophet pour un PRM donné."""
 
     target_col      = config["target"]
-    regressors      = config["prophet"]["regressors"]
     validation_days = config.get("validation", {}).get("days", 30)
 
     print(f"\n{'='*60}")
@@ -303,13 +381,10 @@ def train_one_site(data_path, config, prm, config_path):
 
         print("\n--- Préparation Prophet ---")
         df_prophet = prepare_data_for_prophet(df_feat, target_col, config)
+        regressors = [c for c in df_prophet.columns if c not in ["ds", "y", "cap", "floor"]]
 
-        # Gestion logistic growth
-        growth = config["prophet"].get("growth", "linear")
-        if prm and "site_overrides" in config:
-            growth = config["site_overrides"].get(str(prm), {}).get("growth", growth)
-        df_prophet["cap"] = df_feat["cap"]
-        df_prophet["floor"] = df_feat["floor"]
+        if not regressors:
+            raise ValueError("Aucun regressor disponible après préparation des données Prophet.")
 
         # Split temporel
         split_date = df_prophet["ds"].max() - pd.Timedelta(days=validation_days)
@@ -341,14 +416,42 @@ def train_one_site(data_path, config, prm, config_path):
             model.add_regressor(col, standardize=False)
 
         print("\n--- Entraînement ---")
-        model.fit(df_train)
+        fit_options = build_fit_options(config, prm=prm)
+
+        if not fit_options["enabled"]:
+            print("   Mode fit notebook-compatible (model.fit(df_train))")
+            model.fit(df_train)
+        else:
+            fit_kwargs = {
+                "iter": fit_options["iter"],
+                "seed": fit_options["seed"],
+            }
+
+            if fit_options["output_dir"]:
+                # Sécurise les répertoires temporaires pour CmdStan (Windows)
+                cmdstan_tmp = Path(fit_options["output_dir"]).parent
+                os.environ["TMP"] = str(cmdstan_tmp.resolve())
+                os.environ["TEMP"] = str(cmdstan_tmp.resolve())
+                fit_kwargs["output_dir"] = fit_options["output_dir"]
+
+            if fit_options["timeout"] is not None:
+                fit_kwargs["timeout"] = fit_options["timeout"]
+
+            print(
+                f"   Fit options: algorithm={fit_options['algorithm']} "
+                f"iter={fit_options['iter']} seed={fit_options['seed']}"
+            )
+            if fit_options["output_dir"]:
+                print(f"   CmdStan output_dir: {fit_options['output_dir']}")
+
+            model.fit(df_train, algorithm=fit_options["algorithm"], **fit_kwargs)
 
         # Évaluation
         print("\n--- Évaluation ---")
         naive_baseline(df_prophet, df_val)
         metrics = evaluate_model(model, df_val)
         print(f"   Prophet → MAE={metrics['mae']:.2f} W  RMSE={metrics['rmse']:.2f} W  "
-              f"MAPE={metrics['mape']:.1f}%  R²={metrics['r2']:.4f}")
+              f"MAPE={metrics['mape']:.1f}%  WAPE={metrics['wape']:.1f}%  R²={metrics['r2']:.4f}")
 
         # Sauvegarde
         print("\n--- Sauvegarde ---")
@@ -365,6 +468,7 @@ def train_one_site(data_path, config, prm, config_path):
                     "MAE":  metrics["mae"],
                     "RMSE": metrics["rmse"],
                     "MAPE": metrics["mape"],
+                    "WAPE": metrics["wape"],
                     "R2":   metrics["r2"],
                 }
                 run_id = log_prophet_training(
@@ -446,10 +550,10 @@ if __name__ == "__main__":
     print(f"\n{'='*60}")
     print("  RÉSUMÉ")
     print(f"{'='*60}")
-    print(f"  {'PRM':<20} {'MAE':>8} {'RMSE':>8} {'MAPE':>7} {'R²':>8}")
-    print(f"  {'-'*55}")
+    print(f"  {'PRM':<20} {'MAE':>8} {'RMSE':>8} {'MAPE':>7} {'WAPE':>7} {'R²':>8}")
+    print(f"  {'-'*64}")
     for prm, m in results.items():
         if m:
-            print(f"  {prm:<20} {m['mae']:>7.1f}  {m['rmse']:>7.1f}  {m['mape']:>6.1f}%  {m['r2']:>7.4f}")
+            print(f"  {prm:<20} {m['mae']:>7.1f}  {m['rmse']:>7.1f}  {m['mape']:>6.1f}%  {m['wape']:>6.1f}%  {m['r2']:>7.4f}")
         else:
             print(f"  {prm:<20}  {'ÉCHEC':>40}")
