@@ -163,6 +163,7 @@ Scraping_prix/scrap_env/
 Scraping_prix/*.json
 
 database_dataclean/
+notebooks/
 
 old/
 
@@ -182,3 +183,5 @@ old/
 *.lo1
 
 .gitignore
+
+*.db
