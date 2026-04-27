@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app
+    environment:
+      - ENV=ci
+    command: ["sh", "scripts/run_ci_tests.sh"]
+
+  db:
+    image: postgres:latest
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: db_name
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+volumes:
+  db_data:

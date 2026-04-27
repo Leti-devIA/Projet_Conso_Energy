@@ -97,7 +97,7 @@ def clean_data(df):
 
     missing = df.isnull().sum()
     if missing.sum() > 0:
-        print(f"⚠️  Valeurs manquantes :")
+        print("⚠️  Valeurs manquantes :")
         print(missing[missing > 0])
 
     print(f"✅ Données nettoyées : {len(df)} lignes")

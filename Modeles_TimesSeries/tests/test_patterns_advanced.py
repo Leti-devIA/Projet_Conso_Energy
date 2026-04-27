@@ -7,6 +7,8 @@ Ce fichier sert de référence pour les patterns courants en testing.
 import pytest
 import pandas as pd
 import numpy as np
+import sys
+import time
 
 
 # =====================================================================
@@ -46,7 +48,6 @@ def test_slow_operation():
     """Ce test est marqué comme 'slow'."""
     # Pour l'exécuter : pytest -m slow
     # Pour l'éviter   : pytest -m "not slow"
-    import time
     time.sleep(0.1)
     assert True
 
@@ -229,7 +230,7 @@ class TestMultipleAssertions:
 # =====================================================================
 # PATTERN 11 : Conditional skip
 # =====================================================================
-import sys
+
 
 @pytest.mark.skipif(sys.version_info < (3, 10), reason="Python 3.10+ required")
 def test_python310_feature():
@@ -322,7 +323,6 @@ class TestDataFrameOperations:
 @pytest.mark.slow
 def test_performance_with_timeout():
     """Test que le code termine en moins d'une seconde."""
-    import time
 
     # Importe pytest-timeout : pip install pytest-timeout
     # ajoute à pytest.ini : timeout = 1

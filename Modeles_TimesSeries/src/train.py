@@ -87,14 +87,7 @@ def prepare_data_for_prophet(df, target_col, config):
     if missing:
         print(f"   ⚠️  Regressors absents : {missing}")
 
-    extra_feature_cols = [
-        c for c in df.columns
-        if c.startswith('puissance_lag_') or c.startswith('puissance_roll_')
-        or c.startswith('puissance_std_') or c.startswith('puissance_min_')
-        or c.startswith('puissance_max_')
-    ]
     retained_extra = [c for c in regressors if c.startswith('puissance_')]
-    excluded_extra = [c for c in extra_feature_cols if c not in retained_extra]
 
     if retained_extra:
         print(f"   Regressors extra retenus : {retained_extra}")
@@ -166,7 +159,7 @@ def run_cross_validation(model, df_train, config, prm):
         period  = cv_cfg.get("period",  "90 days")
         horizon = cv_cfg.get("horizon", "30 days")
 
-        print(f"--- Cross-Validation ---")
+        print("--- Cross-Validation ---")
         print(f"   initial={initial}  period={period}  horizon={horizon}")
 
         df_cv = cross_validation(
@@ -370,7 +363,7 @@ def train_one_site(data_path, config, prm, config_path):
 
     try:
         print("\n--- Preprocessing ---")
-        df_pre = preprocess_pipeline(prm=prm)
+        preprocess_pipeline(prm=prm)
 
         print("\n--- Feature Engineering ---")
         df_feat, config = feature_engineering_pipeline(prm=prm, source="csv", config_path=config_path)

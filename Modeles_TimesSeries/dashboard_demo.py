@@ -41,9 +41,10 @@ PRED_DIR      = DATA_DIR / "predictions"
 PROCESSED_DIR = DATA_DIR / "processed"
 SITES_FILE    = DATA_DIR / "raw" / "sites" / "table_sites.csv"
 PRICE_FILE    = DATA_DIR / "raw" / "prix"  / "prix_spot.csv"
+ACHATS_DIR    = DATA_DIR / "raw" / "achats"
 MLRUNS_DIR    = BASE_DIR / "mlruns"
 USERS_DB_FILE = BASE_DIR / "users_demo.db"
-LOGO_FILE     = BASE_DIR / "logo.png"
+LOGO_FILE     = BASE_DIR / "data" / "logo 100x100.png"
 
 # URL de l'API d'entraînement (à configurer selon l'environnement)
 API_TRAIN_URL = "http://localhost:8001"
@@ -475,6 +476,32 @@ def load_prices() -> pd.DataFrame:
 
 
 @st.cache_data
+def load_achats() -> pd.DataFrame:
+    """Charge tous les fichiers CSV ENEDIS_SUIVI_ACHAT_ENERGIE_*.csv depuis data/raw/achats/."""
+    if not ACHATS_DIR.exists():
+        return pd.DataFrame()
+    frames = []
+    for f in sorted(ACHATS_DIR.glob("ENEDIS_SUIVI_ACHAT_ENERGIE_*.csv")):
+        try:
+            df = pd.read_csv(f, sep=";")
+            df.columns = [c.strip() for c in df.columns]
+            frames.append(df)
+        except Exception:
+            pass
+    if not frames:
+        return pd.DataFrame()
+    out = pd.concat(frames, ignore_index=True).drop_duplicates()
+    for col in ("DATE_ACHAT", "DEB_PERIODE", "FIN_PERIODE"):
+        if col in out.columns:
+            out[col] = pd.to_datetime(out[col], errors="coerce")
+    for col in ("FIXATION_PUISSANCE_ACHAT_MW", "PRIX_FIXATION", "VOLUME_TOTAL_PERIODE", "COUT_TOTAL_PERIODE"):
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col], errors="coerce")
+    out["FIXATION_PUISSANCE_ACHAT_KW"] = out["FIXATION_PUISSANCE_ACHAT_MW"] * 1000
+    return out
+
+
+@st.cache_data
 def load_mlflow_metrics(prm: str) -> dict | None:
     if not MLRUNS_DIR.exists():
         return None
@@ -603,7 +630,7 @@ def fig_consumption_curve(df: pd.DataFrame, aggregate: bool = False) -> go.Figur
     )
     fig.update_traces(line=dict(width=2.5))
     fig.update_layout(title=dict(font=dict(size=14, color=_title_color()), x=0))
-    _plotly_layout(fig, height=400, x_grid=True, y_grid=True)
+    _plotly_layout(fig, height=600, x_grid=True, y_grid=True)
     return fig
 
 
@@ -623,7 +650,7 @@ def fig_yearly_bar(df: pd.DataFrame) -> go.Figure:
         labels={"year": "Année", "site_label": "Site"},
     )
     fig.update_layout(title=dict(font=dict(size=14, color=_title_color()), x=0), bargap=0.24, bargroupgap=0.08)
-    _plotly_layout(fig, height=380, x_grid=False, y_grid=True)
+    _plotly_layout(fig, height=600, x_grid=False, y_grid=True)
     return fig
 
 
@@ -695,7 +722,7 @@ def fig_annual_total_bar(df: pd.DataFrame) -> go.Figure:
         title=dict(text="Consommation totale par année (MWh)", font=dict(size=14, color=_title_color()), x=0),
         bargap=0.35,
     )
-    _plotly_layout(fig, height=360, x_grid=False, y_grid=True)
+    _plotly_layout(fig, height=600, x_grid=False, y_grid=True)
     return fig
 
 
@@ -767,8 +794,8 @@ def init_users_db() -> None:
         conn.executemany(
             "INSERT OR IGNORE INTO users(username, password_hash, role) VALUES (?, ?, ?)",
             [
-                ("admin",   hash_password("admin123"),   "admin"),
-                ("lecteur", hash_password("lecteur123"), "lecteur"),
+                ("admin",   hash_password("passadmin"),   "admin"),
+                ("lecteur", hash_password("passlecteur"), "lecteur"),
             ],
         )
         conn.commit()
@@ -908,7 +935,7 @@ if not st.session_state.authenticated:
         )
 
         with st.form("login_form"):
-            username_input = st.text_input("Identifiant", placeholder="admin ou lecteur")
+            username_input = st.text_input("Identifiant", placeholder="identifiant")
             password_input = st.text_input("Mot de passe", type="password", placeholder="••••••••")
             submitted = st.form_submit_button("Se connecter", use_container_width=True, type="primary")
 
@@ -922,7 +949,6 @@ if not st.session_state.authenticated:
             else:
                 st.error("Identifiants invalides")
 
-        st.caption("Comptes de démonstration : `admin / admin123`  ·  `lecteur / lecteur123`")
     st.stop()
 
 
@@ -1061,6 +1087,20 @@ with st.sidebar:
     end_date   = (_label_to_ts[_sel_end] + pd.offsets.MonthEnd(0)).date()
     st.caption(f"Du **{_sel_start}** au **{_sel_end}**")
 
+    # Années complètes (multi-sélection)
+    _all_years = list(range(int(global_min_hist.year), int(global_max.year) + 1))
+    selected_years = st.multiselect(
+        "Années complètes",
+        options=_all_years,
+        default=_all_years,
+        help="Sélectionnez une ou plusieurs années complètes.",
+    )
+    if selected_years:
+        _years_txt = ", ".join(str(y) for y in sorted(selected_years))
+        st.caption(f"Années sélectionnées : **{_years_txt}**")
+    else:
+        st.caption("Années sélectionnées : **aucune**")
+
     # Gestion utilisateurs (admin)
     if current_role == "admin":
         st.markdown("---")
@@ -1083,7 +1123,12 @@ def _date_mask(df: pd.DataFrame) -> pd.Series:
         df["site_label"].isin(selected_sites)
         & (df["datetime"] >= pd.to_datetime(start_date))
         & (df["datetime"] <= pd.to_datetime(end_date))
+        & (df["datetime"].dt.year.isin(selected_years))
     )
+
+if not selected_years:
+    st.warning("Sélectionnez au moins une année complète dans les filtres.")
+    st.stop()
 
 filtered_pred = preds_df.loc[_date_mask(preds_df)].copy() if not preds_df.empty else pd.DataFrame()
 filtered_hist = hist_df.loc[_date_mask(hist_df)].copy()   if not hist_df.empty  else pd.DataFrame()
@@ -1336,6 +1381,9 @@ if multi_site:
         monthly_prices = build_monthly_price_series(
             prices_df, pd.to_datetime(start_date), pd.to_datetime(end_date), price_priority
         )
+        monthly_prices = monthly_prices.loc[
+            monthly_prices["month"].dt.year.isin(selected_years)
+        ].copy()
         if not monthly_prices.empty:
             st.plotly_chart(fig_price_curve(monthly_prices), use_container_width=True)
         else:
@@ -1351,7 +1399,7 @@ if multi_site:
 <div class="section-block">
     <div class="section-heading">
         <h2>🧮 Simulation achat</h2>
-        <span class="section-desc">Modélisation des coûts Base / Peak selon vos paramètres contractuels</span>
+        <span class="section-desc">Portefeuille d'achats, couverture prévisionnelle et modélisation des coûts Base / Peak</span>
     </div>
 </div>""", unsafe_allow_html=True)
 
@@ -1363,67 +1411,379 @@ if multi_site:
         st.markdown('<div class="info-subtle">⚠️ Simulation impossible sans données de prix.</div>', unsafe_allow_html=True)
     else:
         sim_df = filtered.groupby("datetime", as_index=False)["puissance_kw"].sum()
+        sel_start = pd.to_datetime(start_date)
+        sel_end   = pd.to_datetime(end_date)
 
-    with st.expander("⚙️ Paramètres de simulation", expanded=False):
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            base_volume = st.number_input("Volume base acheté (kW)", min_value=0.0, value=500.0, step=10.0)
-            peak_volume = st.number_input("Volume peak acheté (kW)", min_value=0.0, value=200.0, step=10.0)
-        with c2:
-            peak_start      = st.slider("Heure début peak", 0, 23, 8)
-            peak_end        = st.slider("Heure fin peak",   0, 23, 20)
-            include_weekend = st.checkbox("Inclure weekend en peak", value=False)
-        with c3:
-            turpe_kwh = st.number_input("TURPE (EUR/kWh)", min_value=0.0, value=0.0, step=0.001, format="%.3f")
-            tax_rate  = st.number_input("Taxes (taux, ex: 0.20)", min_value=0.0, value=0.0, step=0.01, format="%.2f")
+        # ── Chargement des achats ──────────────────────────────────────────
+        achats_df = load_achats()
+        achats_filt = pd.DataFrame()
+        if not achats_df.empty:
+            achats_filt = achats_df[
+                (achats_df["DEB_PERIODE"] <= sel_end) &
+                (achats_df["FIN_PERIODE"] >= sel_start)
+            ].copy()
+            if not achats_filt.empty:
+                achats_filt["ANNEE"] = achats_filt["DEB_PERIODE"].dt.year
+                achats_filt = achats_filt[achats_filt["ANNEE"].isin(selected_years)].copy()
 
-    priority = ["mensuel", "trimestriel", "annuel"]
-    sim_df = sim_df.sort_values("datetime").reset_index(drop=True)
-    sim_df["price_base"] = price_for_datetimes(sim_df["datetime"], prices_df, "prix_base", priority)
-    sim_df["price_peak"] = price_for_datetimes(sim_df["datetime"], prices_df, "prix_peak", priority)
+        # ── Portefeuille existant ──────────────────────────────────────────
+        st.markdown("#### 📋 Portefeuille d'achats existants")
+        if achats_filt.empty:
+            st.markdown('<div class="info-subtle">Aucun achat trouvé sur la période sélectionnée. Déposez un fichier ENEDIS_SUIVI_ACHAT_ENERGIE_*.csv dans data/raw/achats/.</div>', unsafe_allow_html=True)
+        else:
+            grp = (
+                achats_filt.groupby(["ANNEE", "TYPE_ACHAT"], as_index=False)
+                .agg(
+                    MW_Total=("FIXATION_PUISSANCE_ACHAT_MW", "sum"),
+                    Cout_Total=("COUT_TOTAL_PERIODE", "sum"),
+                    Nb_Contrats=("CONTREPARTIE", "count"),
+                )
+            )
+            # Prix moyen pondéré par volume
+            def _wavg_prix(sub_df: pd.DataFrame) -> float:
+                vol = achats_filt.loc[sub_df.index, "VOLUME_TOTAL_PERIODE"].fillna(1)
+                return float(np.average(sub_df["PRIX_FIXATION"], weights=vol))
+            prix_moy = (
+                achats_filt.groupby(["ANNEE", "TYPE_ACHAT"])
+                .apply(lambda s: float(np.average(s["PRIX_FIXATION"], weights=s["VOLUME_TOTAL_PERIODE"].fillna(1))))
+                .reset_index(name="Prix_Moy")
+            )
+            grp = grp.merge(prix_moy, on=["ANNEE", "TYPE_ACHAT"], how="left")
+            grp["kW_Total"] = grp["MW_Total"] * 1000
+            grp["Prix_Moy"] = grp["Prix_Moy"].round(2)
+            grp["Cout_M€"]  = (grp["Cout_Total"] / 1e6).round(3)
+            st.dataframe(
+                grp[["ANNEE", "TYPE_ACHAT", "MW_Total", "kW_Total", "Prix_Moy", "Cout_M€", "Nb_Contrats"]]
+                  .rename(columns={
+                      "ANNEE": "Année", "TYPE_ACHAT": "Type",
+                      "MW_Total": "Puissance (MW)", "kW_Total": "Puissance (kW)",
+                      "Prix_Moy": "Prix moy. (€/MWh)", "Cout_M€": "Coût total (M€)",
+                      "Nb_Contrats": "Nb contrats",
+                  }),
+                use_container_width=True,
+                hide_index=True,
+            )
 
-    is_peak = sim_df["datetime"].dt.hour.between(peak_start, peak_end)
-    if not include_weekend:
-        is_peak = is_peak & (sim_df["datetime"].dt.weekday < 5)
+            # ── Couverture par année ───────────────────────────────────────
+            st.markdown("#### 📊 Couverture vs consommation prévisionnelle")
+            conso_yearly = (
+                sim_df.assign(ANNEE=pd.to_datetime(sim_df["datetime"]).dt.year)
+                .groupby("ANNEE")["puissance_kw"]
+                .sum().reset_index(name="conso_kwh")
+            )
+            achats_yearly = (
+                achats_filt.groupby("ANNEE")["VOLUME_TOTAL_PERIODE"]
+                .sum().reset_index(name="volume_acheté_mwh")
+            )
+            achats_yearly["volume_acheté_kwh"] = achats_yearly["volume_acheté_mwh"] * 1000
+            cov = conso_yearly.merge(achats_yearly, on="ANNEE", how="left")
+            cov["volume_acheté_kwh"] = cov["volume_acheté_kwh"].fillna(0)
+            cov["taux_couverture"]   = (cov["volume_acheté_kwh"] / cov["conso_kwh"] * 100).clip(0, 200)
+            cov["restant_kwh"]       = (cov["conso_kwh"] - cov["volume_acheté_kwh"]).clip(0)
+            cov["restant_mw_moy"]    = (cov["restant_kwh"] / (8760 * 1000)).round(3)
+            cov_disp = cov.assign(
+                conso_GWh   = (cov["conso_kwh"]          / 1e6).round(3),
+                acheté_GWh  = (cov["volume_acheté_kwh"]  / 1e6).round(3),
+                restant_GWh = (cov["restant_kwh"]        / 1e6).round(3),
+                Couverture  = cov["taux_couverture"].round(1),
+            )
+            st.dataframe(
+                cov_disp[["ANNEE", "conso_GWh", "acheté_GWh", "restant_GWh", "Couverture", "restant_mw_moy"]]
+                  .rename(columns={
+                      "ANNEE": "Année",
+                      "conso_GWh": "Conso prévi. (GWh)",
+                      "acheté_GWh": "Acheté (GWh)",
+                      "restant_GWh": "Restant à acheter (GWh)",
+                      "Couverture": "Couverture (%)",
+                      "restant_mw_moy": "Restant (MW moyen)",
+                  }),
+                use_container_width=True,
+                hide_index=True,
+            )
+            for _, row in cov.iterrows():
+                pct  = min(row["taux_couverture"] / 100, 1.0)
+                color = "#2CA02C" if pct >= 0.90 else "#FF7F0E" if pct >= 0.50 else "#D62728"
+                st.markdown(
+                    f"<div style='margin:6px 0 2px'>"
+                    f"<span style='font-size:0.85rem;color:var(--muted)'>"
+                    f"{int(row['ANNEE'])} — {row['taux_couverture']:.0f}% couvert"
+                    f"</span></div>"
+                    f"<div style='background:rgba(128,128,128,0.2);border-radius:4px;height:14px'>"
+                    f"<div style='background:{color};width:{min(pct*100,100):.1f}%;height:14px;border-radius:4px'></div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+            st.markdown("<br>", unsafe_allow_html=True)
 
-    sim_df["is_peak"]           = is_peak
-    sim_df["purchased_kw"]      = base_volume + np.where(is_peak, peak_volume, 0.0)
-    sim_df["contract_cost_eur"] = (
-        base_volume * sim_df["price_base"] / 1_000
-        + np.where(is_peak, peak_volume * sim_df["price_peak"] / 1_000, 0.0)
-    )
-    sim_df["spot_price"]      = np.where(is_peak, sim_df["price_peak"], sim_df["price_base"])
-    sim_df["spot_cost_eur"]   = (sim_df["puissance_kw"] - sim_df["purchased_kw"]) * sim_df["spot_price"] / 1_000
-    sim_df["energy_cost_eur"] = sim_df["contract_cost_eur"] + sim_df["spot_cost_eur"]
-    sim_df["turpe_eur"]       = sim_df["puissance_kw"] * turpe_kwh
-    sim_df["subtotal_eur"]    = sim_df["energy_cost_eur"] + sim_df["turpe_eur"]
-    sim_df["taxes_eur"]       = sim_df["subtotal_eur"] * tax_rate
-    sim_df["total_eur"]       = sim_df["subtotal_eur"] + sim_df["taxes_eur"]
+        # cov est défini ici — on le rend disponible hors du bloc achats_filt
+        _cov_for_charts = cov.copy()  # type: ignore[name-defined]
 
-    total_kwh  = sim_df["puissance_kw"].sum()
-    energy_eur = sim_df["energy_cost_eur"].sum()
-    total_eur  = sim_df["total_eur"].sum()
-    avg_price  = total_eur / (total_kwh / 1_000) if total_kwh > 0 else 0.0
 
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Conso totale (kWh)",   f"{total_kwh:,.0f}")
-    k2.metric("Coût énergie (EUR)",   f"{energy_eur:,.0f}")
-    k3.metric("Coût total (EUR)",     f"{total_eur:,.0f}")
-    k4.metric("Prix moyen (EUR/MWh)", f"{avg_price:.2f}")
+        st.markdown("#### ⚙️ Simulation des coûts")
+        with st.expander("Paramètres de simulation", expanded=True):
+            c1, c2, _ = st.columns([1, 1, 1])
+            with c1:
+                peak_start      = st.slider("Heure début heures pleines", 0, 23, 8)
+                peak_end        = st.slider("Heure fin heures pleines",   0, 23, 20)
+            with c2:
+                include_weekend = st.checkbox("Inclure weekend en heures pleines", value=False)
 
-    sc1, sc2 = st.columns(2)
-    with sc1:
-        fig_cost = px.line(sim_df, x="datetime", y="total_eur", title="Coût horaire total",
-                           color_discrete_sequence=[_chart_palette()[0]])
-        fig_cost.update_traces(line=dict(width=2.8))
-        fig_cost.update_layout(yaxis_title="EUR", title=dict(font=dict(size=14, color=_title_color()), x=0))
-        _plotly_layout(fig_cost, height=340, x_grid=True, y_grid=True)
-        st.plotly_chart(fig_cost, use_container_width=True)
-    with sc2:
-        sim_df["total_cum_eur"] = sim_df["total_eur"].cumsum()
-        fig_cum = px.line(sim_df, x="datetime", y="total_cum_eur", title="Coût cumulé",
-                          color_discrete_sequence=[_chart_palette()[2]])
-        fig_cum.update_traces(line=dict(width=2.8))
-        fig_cum.update_layout(yaxis_title="EUR", title=dict(font=dict(size=14, color=_title_color()), x=0))
-        _plotly_layout(fig_cum, height=340, x_grid=True, y_grid=True)
-        st.plotly_chart(fig_cum, use_container_width=True)
+            st.markdown("**Période d'achat simulé (graphiques uniquement)**")
+            _sim_slider_dates: list[pd.Timestamp] = []
+            _sim_cur = global_min_hist.to_period("M").to_timestamp()
+            _sim_end_ts = global_max.to_period("M").to_timestamp()
+            while _sim_cur <= _sim_end_ts:
+                _sim_slider_dates.append(_sim_cur)
+                _sim_cur += pd.DateOffset(months=1)
+            if not _sim_slider_dates:
+                _sim_slider_dates = [global_min_hist, global_max]
+
+            _sim_slider_labels = [d.strftime("%b %Y") for d in _sim_slider_dates]
+            _sim_seen: set = set()
+            _sim_uniq_labels: list[str] = []
+            for lbl in _sim_slider_labels:
+                if lbl not in _sim_seen:
+                    _sim_seen.add(lbl)
+                    _sim_uniq_labels.append(lbl)
+            _sim_slider_labels = _sim_uniq_labels
+            _sim_label_to_ts   = {d.strftime("%b %Y"): d for d in _sim_slider_dates}
+
+            _sim_sel_start, _sim_sel_end = st.select_slider(
+                "Période d'achat simulé",
+                options=_sim_slider_labels,
+                value=(_sim_slider_labels[0], _sim_slider_labels[-1]),
+                label_visibility="collapsed",
+                key="sim_period_slider",
+            )
+            sim_graph_start = _sim_label_to_ts[_sim_sel_start].date()
+            sim_graph_end   = (_sim_label_to_ts[_sim_sel_end] + pd.offsets.MonthEnd(0)).date()
+            st.caption(f"Graphiques simulation du **{_sim_sel_start}** au **{_sim_sel_end}**")
+
+        # ── Calculs de prix sur toute la période ──────────────────────────
+        priority = ["mensuel", "trimestriel", "annuel"]
+        sim_df = sim_df.sort_values("datetime").reset_index(drop=True)
+        sim_df["price_base"] = price_for_datetimes(sim_df["datetime"], prices_df, "prix_base", priority)
+        sim_df["price_peak"] = price_for_datetimes(sim_df["datetime"], prices_df, "prix_peak", priority)
+
+        is_peak_full = sim_df["datetime"].dt.hour.between(peak_start, peak_end)
+        if not include_weekend:
+            is_peak_full = is_peak_full & (sim_df["datetime"].dt.weekday < 5)
+        sim_df["spot_price_full"] = np.where(is_peak_full, sim_df["price_peak"], sim_df["price_base"])
+
+        # ── Construire ann depuis _cov_for_charts (mêmes données que le tableau couverture) ──
+        # Fallback si achats_filt était vide (cov non défini)
+        if "_cov_for_charts" not in dir():
+            _cov_for_charts = pd.DataFrame()
+
+        if _cov_for_charts.empty:
+            # Pas de contrats : besoins uniquement depuis sim_df
+            _sim_conso = (
+                sim_df.assign(ANNEE=sim_df["datetime"].dt.year)
+                .groupby("ANNEE")["puissance_kw"].sum().reset_index(name="conso_kwh")
+            )
+            _cov_for_charts = _sim_conso.assign(
+                volume_acheté_kwh=0.0,
+                taux_couverture=0.0,
+                restant_kwh=_sim_conso["conso_kwh"],
+            )
+
+        # ── KPI globaux (depuis _cov_for_charts, même échelle que le tableau) ──
+        total_pred_kwh   = _cov_for_charts["conso_kwh"].sum()
+        total_achete_kwh = _cov_for_charts["volume_acheté_kwh"].sum()
+        total_restant_kwh = _cov_for_charts["restant_kwh"].sum()
+        taux_global = (total_achete_kwh / total_pred_kwh * 100) if total_pred_kwh > 0 else 0.0
+
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Besoin total prévi. (GWh)", f"{total_pred_kwh/1e6:,.2f}")
+        k2.metric("Volume acheté (GWh)",       f"{total_achete_kwh/1e6:,.2f}")
+        k3.metric("Restant à couvrir (GWh)",   f"{total_restant_kwh/1e6:,.2f}")
+        k4.metric("Taux de couverture",        f"{taux_global:.1f}%")
+
+        # ── Filtrage sur la période d'achat simulé pour les graphiques ──────
+        _cov_plot = _cov_for_charts[
+            _cov_for_charts["ANNEE"].between(
+                pd.to_datetime(sim_graph_start).year,
+                pd.to_datetime(sim_graph_end).year,
+            )
+        ].copy()
+
+        if _cov_plot.empty:
+            st.markdown('<div class="info-subtle">Aucune donnée sur la période d\'achat simulée sélectionnée.</div>', unsafe_allow_html=True)
+        else:
+            # Construire ann en GWh (même conversion que cov_disp)
+            ann = _cov_plot.assign(
+                besoin_gwh  = (_cov_plot["conso_kwh"]          / 1e6).round(3),
+                achete_gwh  = (_cov_plot["volume_acheté_kwh"]  / 1e6).round(3),
+                restant_gwh = (_cov_plot["restant_kwh"]        / 1e6).round(3),
+                couverture  = _cov_plot["taux_couverture"].round(1),
+                ANNEE       = _cov_plot["ANNEE"].astype(str),
+            )
+
+            # Prix spot moyen annuel pour estimer le coût du restant
+            _sim_yr = sim_df[
+                (sim_df["datetime"] >= pd.to_datetime(sim_graph_start)) &
+                (sim_df["datetime"] <= pd.to_datetime(sim_graph_end))
+            ].copy()
+            _sim_yr["ANNEE"] = _sim_yr["datetime"].dt.year.astype(str)
+            avg_spot_an = _sim_yr.groupby("ANNEE")["spot_price_full"].mean().reset_index(name="avg_spot")
+
+            # Coût contrat par année depuis achats_filt
+            _achats_sim = achats_filt[
+                (achats_filt["DEB_PERIODE"] <= pd.to_datetime(sim_graph_end)) &
+                (achats_filt["FIN_PERIODE"] >= pd.to_datetime(sim_graph_start))
+            ].copy() if not achats_filt.empty else pd.DataFrame()
+            if not _achats_sim.empty and "ANNEE" not in _achats_sim.columns:
+                _achats_sim["ANNEE"] = _achats_sim["DEB_PERIODE"].dt.year
+            if not _achats_sim.empty and "COUT_TOTAL_PERIODE" in _achats_sim.columns:
+                cout_contrat_an = (
+                    _achats_sim.assign(ANNEE=_achats_sim["DEB_PERIODE"].dt.year.astype(str))
+                    .groupby("ANNEE")["COUT_TOTAL_PERIODE"]
+                    .sum().reset_index(name="cout_contrat_meur")
+                )
+                cout_contrat_an["cout_contrat_meur"] /= 1e6
+            else:
+                cout_contrat_an = pd.DataFrame(columns=["ANNEE", "cout_contrat_meur"])
+
+            ann = ann.merge(avg_spot_an, on="ANNEE", how="left")
+            ann = ann.merge(cout_contrat_an, on="ANNEE", how="left")
+            ann["avg_spot"]           = ann["avg_spot"].fillna(0.0)
+            ann["cout_contrat_meur"]  = ann["cout_contrat_meur"].fillna(0.0)
+            ann["cout_spot_est_meur"] = (ann["restant_gwh"] * ann["avg_spot"] * 1_000 / 1e6).round(3)
+
+            # ── Simulation d'un nouvel achat ──────────────────────────────
+            with st.expander("Simuler un nouvel achat", expanded=False):
+                _years_avail = sorted(ann["ANNEE"].unique().tolist())
+                sa1, sa2, sa3, sa4 = st.columns(4)
+                with sa1:
+                    sim_achat_annee = st.selectbox("Année", options=_years_avail, key="sim_achat_annee")
+                with sa2:
+                    sim_achat_base_gwh = st.number_input(
+                        "Volume base (GWh)", min_value=0.0, value=0.0, step=0.1, format="%.2f",
+                        help="Volume base à acheter en GWh pour l'année sélectionnée",
+                        key="sim_achat_base",
+                    )
+                with sa3:
+                    sim_achat_peak_gwh = st.number_input(
+                        "Volume peak (GWh)", min_value=0.0, value=0.0, step=0.1, format="%.2f",
+                        help="Volume peak à acheter en GWh pour l'année sélectionnée",
+                        key="sim_achat_peak",
+                    )
+                with sa4:
+                    sim_achat_prix = st.number_input(
+                        "Prix fixe (€/MWh)", min_value=0.0, value=80.0, step=1.0, format="%.1f",
+                        help="Prix de fixation hypothétique pour cet achat",
+                        key="sim_achat_prix",
+                    )
+                _total_sim_gwh = sim_achat_base_gwh + sim_achat_peak_gwh
+                _cout_sim_meur = (_total_sim_gwh * sim_achat_prix * 1_000 / 1e6) if _total_sim_gwh > 0 else 0.0
+                if _total_sim_gwh > 0:
+                    st.caption(
+                        f"Achat simulé : **{_total_sim_gwh:.2f} GWh** "
+                        f"(base {sim_achat_base_gwh:.2f} + peak {sim_achat_peak_gwh:.2f}) "
+                        f"@ {sim_achat_prix:.1f} €/MWh → **coût estimé {_cout_sim_meur:.2f} M€**"
+                    )
+
+            # Appliquer la simulation sur ann (copie pour ne pas muter)
+            ann_sim = ann.copy()
+            ann_sim["achete_sim_gwh"]    = 0.0
+            ann_sim["cout_sim_meur"]     = 0.0
+            if _total_sim_gwh > 0:
+                _mask = ann_sim["ANNEE"] == str(sim_achat_annee)
+                ann_sim.loc[_mask, "achete_sim_gwh"] = _total_sim_gwh
+                ann_sim.loc[_mask, "cout_sim_meur"]  = _cout_sim_meur
+                # Recalcul achete + restant + couverture avec la simulation
+                ann_sim["achete_gwh_total"] = ann_sim["achete_gwh"] + ann_sim["achete_sim_gwh"]
+                ann_sim["restant_gwh_sim"]  = (ann_sim["besoin_gwh"] - ann_sim["achete_gwh_total"]).clip(lower=0.0)
+                ann_sim["couverture_sim"]   = (ann_sim["achete_gwh_total"] / ann_sim["besoin_gwh"] * 100).clip(0, 200).round(1)
+                ann_sim["cout_spot_sim"]    = (ann_sim["restant_gwh_sim"] * ann_sim["avg_spot"] * 1_000 / 1e6).round(3)
+            else:
+                ann_sim["achete_gwh_total"] = ann_sim["achete_gwh"]
+                ann_sim["restant_gwh_sim"]  = ann_sim["restant_gwh"]
+                ann_sim["couverture_sim"]   = ann_sim["couverture"]
+                ann_sim["cout_spot_sim"]    = ann_sim["cout_spot_est_meur"]
+
+            # ── Graphique 1 : Volumes par année ───────────────────────────
+            sc1, sc2 = st.columns(2)
+            with sc1:
+                # Barres empilées : existant + simulé (couleur distincte) + restant
+                vol_data = []
+                for _, r in ann_sim.iterrows():
+                    vol_data.append({"ANNEE": r["ANNEE"], "serie": "Déjà acheté",        "volume_gwh": r["achete_gwh"],       "couverture": r["couverture_sim"]})
+                    vol_data.append({"ANNEE": r["ANNEE"], "serie": "Achat simulé",        "volume_gwh": r["achete_sim_gwh"],   "couverture": r["couverture_sim"]})
+                    vol_data.append({"ANNEE": r["ANNEE"], "serie": "Restant à couvrir",   "volume_gwh": r["restant_gwh_sim"],  "couverture": r["couverture_sim"]})
+                    vol_data.append({"ANNEE": r["ANNEE"], "serie": "Besoin total",        "volume_gwh": r["besoin_gwh"],       "couverture": r["couverture_sim"]})
+                vol_long = pd.DataFrame(vol_data)
+                # On n'affiche "Besoin total" que comme ligne de référence → barres groupées
+                vol_bars = vol_long[vol_long["serie"] != "Besoin total"]
+                vol_long["serie"] = vol_long["serie"].astype(str)
+                fig_vol = px.bar(
+                    vol_bars,
+                    x="ANNEE", y="volume_gwh", color="serie",
+                    barmode="stack",
+                    title="Volumes par année (GWh)",
+                    color_discrete_map={
+                        "Déjà acheté":       _chart_palette()[0],
+                        "Achat simulé":      "#F5C842",
+                        "Restant à couvrir": _chart_palette()[1],
+                    },
+                    labels={"ANNEE": "Année", "volume_gwh": "GWh", "serie": ""},
+                    text="volume_gwh",
+                )
+                fig_vol.update_traces(texttemplate="%{text:.2f}", textposition="inside")
+                # Ligne de référence "Besoin total"
+                fig_vol.add_scatter(
+                    x=ann_sim["ANNEE"].tolist(),
+                    y=ann_sim["besoin_gwh"].tolist(),
+                    mode="lines+markers",
+                    name="Besoin total",
+                    line=dict(color=_chart_palette()[2], width=2, dash="dot"),
+                    marker=dict(size=7),
+                )
+                # Annotations couverture %
+                for _, row in ann_sim.iterrows():
+                    fig_vol.add_annotation(
+                        x=str(row["ANNEE"]), y=row["besoin_gwh"] * 1.10,
+                        text=f"<b>{row['couverture_sim']:.0f}% couvert</b>",
+                        showarrow=False, font=dict(size=11, color=_title_color()),
+                    )
+                fig_vol.update_layout(yaxis_title="GWh", title=dict(font=dict(size=14, color=_title_color()), x=0))
+                _plotly_layout(fig_vol, height=450, x_grid=False, y_grid=True)
+                st.plotly_chart(fig_vol, use_container_width=True)
+
+            # ── Graphique 2 : Estimation des coûts par année ──────────────
+            with sc2:
+                cost_data = []
+                for _, r in ann_sim.iterrows():
+                    cost_data.append({"ANNEE": r["ANNEE"], "composante": "Contrats signés",       "cout_meur": r["cout_contrat_meur"]})
+                    cost_data.append({"ANNEE": r["ANNEE"], "composante": "Achat simulé (coût)",   "cout_meur": r["cout_sim_meur"]})
+                    cost_data.append({"ANNEE": r["ANNEE"], "composante": "Restant (estimé spot)",  "cout_meur": r["cout_spot_sim"]})
+                cost_long = pd.DataFrame(cost_data)
+                fig_cost = px.bar(
+                    cost_long,
+                    x="ANNEE", y="cout_meur", color="composante",
+                    barmode="stack",
+                    title="Estimation des coûts par année (M€)",
+                    color_discrete_map={
+                        "Contrats signés":       _chart_palette()[0],
+                        "Achat simulé (coût)":   "#F5C842",
+                        "Restant (estimé spot)":  _chart_palette()[1],
+                    },
+                    labels={"ANNEE": "Année", "cout_meur": "M€", "composante": ""},
+                    text="cout_meur",
+                )
+                fig_cost.update_traces(texttemplate="%{text:.2f} M€", textposition="inside")
+                # Ligne de coût total
+                total_couts = ann_sim["cout_contrat_meur"] + ann_sim["cout_sim_meur"] + ann_sim["cout_spot_sim"]
+                fig_cost.add_scatter(
+                    x=ann_sim["ANNEE"].tolist(), y=total_couts.tolist(),
+                    mode="lines+markers+text",
+                    name="Total estimé",
+                    line=dict(color=_chart_palette()[2], width=2, dash="dot"),
+                    marker=dict(size=8),
+                    text=[f"{v:.2f} M€" for v in total_couts],
+                    textposition="top center",
+                    textfont=dict(size=11, color=_title_color()),
+                )
+                fig_cost.update_layout(yaxis_title="M€", title=dict(font=dict(size=14, color=_title_color()), x=0))
+                _plotly_layout(fig_cost, height=450, x_grid=False, y_grid=True)
+                st.plotly_chart(fig_cost, use_container_width=True)

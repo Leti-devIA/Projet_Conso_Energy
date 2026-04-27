@@ -1,10 +1,8 @@
 """Tests pour feature_engineering.py"""
-import pytest
 import pandas as pd
 import numpy as np
 import sys
 from pathlib import Path
-from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -104,15 +102,28 @@ class TestFeatureEngineering:
     """Tests d'intégration pour feature engineering."""
 
     def test_features_dont_have_nan_only(self, sample_dataframe):
-        """Test que les features créées ne sont pas que des NaN."""
-        df = sample_dataframe.copy()
-        df["datetime"] = pd.to_datetime(df["datetime"])
+        """Vérifie que les features générées ne sont pas entièrement NaN."""
 
-        df_feat = create_temporal_features(df)
-        df_feat = create_lag_features(df_feat, "puissance_moy_heure")
+        df_feat = sample_dataframe.copy()
 
-        # Chaque colonne de features ne doit pas être entièrement NaN
-        for col in df_feat.columns:
-            if col not in ["datetime", "puissance_moy_heure"]:
-                # Au moins une valeur non-NaN
-                assert df_feat[col].notna().sum() > 0, f"Colonne {col} est entièrement NaN"
+        # Appliquer les transformations avec le bon DataFrame
+        df_feat = create_temporal_features(df_feat)
+        df_feat = create_lag_features(df_feat, target_col='puissance_moy_heure')
+        df_feat = create_rolling_features(df_feat, target_col='puissance_moy_heure')
+
+        # Colonnes à vérifier (exclure les colonnes de base)
+        cols_de_base = ["datetime", "puissance_moy_heure", "temperature", "humidite", "prm"]
+        feature_cols = [c for c in df_feat.columns if c not in cols_de_base]
+
+        for col in feature_cols:
+            # Ignorer les lags trop grands pour le dataset de test (100 lignes)
+            if "lag_" in col:
+                try:
+                    lag_val = int(col.split("_")[-1])
+                    if lag_val >= len(df_feat):
+                        continue
+                except (ValueError, IndexError):
+                    pass
+
+            non_null_count = df_feat[col].notna().sum()
+            assert non_null_count > 0, f"Colonne {col} est entièrement NaN"

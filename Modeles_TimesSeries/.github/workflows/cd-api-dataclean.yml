@@ -1,0 +1,65 @@
+# ========================================
+# Workflow CD - API DataClean
+# ========================================
+# Ce workflow déploie l'API de nettoyage de données.
+# Il se déclenche manuellement ou quand le code de l'API change.
+
+name: CD - Déploiement API DataClean
+
+# Déclenchement :
+# 1. Manuel via l'interface GitHub (workflow_dispatch)
+# 2. Automatique si push sur main ET modification dans api/api-dataclean/
+on:
+  workflow_dispatch:  # Permet de lancer manuellement
+  push:
+    branches: ["main"]
+    paths:
+      - 'api/api-dataclean/**'  # Seulement si cette partie change
+      - '.github/workflows/cd-api-dataclean.yml'
+
+jobs:
+  # ========== JOB 1 : BUILD & DEPLOY ==========
+  deploy:
+    name: Build et déploiement
+    runs-on: ubuntu-latest
+    environment: production  # Environnement protégé (nécessite approbation)
+
+    steps:
+      # Étape 1 : Récupère le code
+      - name: 📥 Récupérer le code
+        uses: actions/checkout@v4
+
+      # Étape 2 : Configure Docker Buildx (pour build multi-plateforme)
+      - name: 🐳 Configurer Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Étape 3 : Se connecter à Docker Hub (nécessite secrets)
+      - name: 🔐 Connexion Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # Étape 4 : Build l'image Docker de l'API
+      - name: 🏗️ Build Docker image
+        working-directory: ./api/api-dataclean
+        run: |
+          # Crée l'image avec un tag basé sur le commit
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/api-dataclean:latest \
+                       -t ${{ secrets.DOCKER_USERNAME }}/api-dataclean:${{ github.sha }} .
+
+      # Étape 5 : Push l'image sur Docker Hub
+      - name: 📤 Push vers Docker Hub
+        run: |
+          # Envoie les 2 tags (latest + commit SHA)
+          docker push ${{ secrets.DOCKER_USERNAME }}/api-dataclean:latest
+          docker push ${{ secrets.DOCKER_USERNAME }}/api-dataclean:${{ github.sha }}
+
+      # Étape 6 : Déploiement sur le serveur (via SSH)
+      - name: 🚀 Déployer sur serveur
+        if: github.ref == 'refs/heads/main'  # Seulement sur la branche main
+        run: |
+          echo "🚀 Déploiement API DataClean réussi !"
+          echo "Image disponible : ${{ secrets.DOCKER_USERNAME }}/api-dataclean:latest"
+          # TODO : Ajouter commande SSH pour redémarrer le conteneur
+          # ssh user@server 'cd /app && docker-compose pull api-dataclean && docker-compose up -d api-dataclean'

@@ -12,7 +12,6 @@ Le script exporte :
 """
 
 import argparse
-import itertools
 import random
 import re
 import json
@@ -393,7 +392,7 @@ def tune_trend(df_train, df_val, regressors, gs_cfg, metrics, prm, rng):
     """Recherche des meilleurs paramètres de trend avec Mango."""
     print("\n================ PHASE 1 : TREND =================")
     trend_space = {
-        "growth": _ensure_space_list(gs_cfg.get("growth"), ["flat"]),
+        "growth": _ensure_space_list(gs_cfg.get("growth"), ["flat", "linear"]),
         "changepoint_prior_scale": _ensure_space_list(
             gs_cfg.get("changepoint_prior_scale"),
             [0.001, 0.01, 0.05, 0.1, 0.3],

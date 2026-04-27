@@ -4,9 +4,6 @@ Script de test manuel (legacy / exploration).
 Note pédagogique : les tests officiels du projet sont dans `tests/`.
 Ce fichier peut servir pour du debug rapide en local.
 """
-
-import pandas as pd
-import numpy as np
 from preprocessing import preprocess_pipeline
 from feature_engineering import feature_engineering_pipeline
 

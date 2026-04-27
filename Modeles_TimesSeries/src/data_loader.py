@@ -179,7 +179,7 @@ class CSVDataLoader(DataLoader):
             print(f"⚠️ Table des sites non trouvée : {sites_table_path}")
             return pd.DataFrame(columns=['id_site', 'ville', 'code_postal', 'prm', 'lat', 'lon', 'prod_elec'])
 
-        print(f"📂 Chargement de la table des sites...")
+        print("📂 Chargement de la table des sites...")
         df = pd.read_csv(sites_table_path)
         print(f"✅ {len(df)} sites chargés")
         return df
