@@ -14,6 +14,9 @@ jobs:
   tests:
     name: Tests unitaires et lint
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Modeles_TimesSeries  # ← TOUT s'exécute depuis ici
 
     steps:
       - name: 📥 Récupérer le code
@@ -29,17 +32,17 @@ jobs:
       - name: 📦 Installer les dépendances
         run: |
           python -m pip install --upgrade pip
-          pip install -r Modeles_TimesSeries/requirements.txt
+          pip install -r requirements.txt
           pip install pytest pytest-cov ruff flake8
 
       - name: 🧹 Vérification code (lint)
         run: |
-          flake8 Modeles_TimesSeries/src/ --count --select=E9,F63,F7,F82 --show-source --statistics
-          ruff check Modeles_TimesSeries/src/ Modeles_TimesSeries/tests/ --ignore E501 || true
+          flake8 src/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          ruff check src/ tests/ --ignore E501 || true
 
       - name: 🧪 Lancer les tests
         run: |
-          pytest Modeles_TimesSeries/tests/ -v --cov=Modeles_TimesSeries/src --cov-report=term --maxfail=1 --disable-warnings
+          pytest tests/ -v --cov=src --cov-report=term --maxfail=1 --disable-warnings
 
       - name: 📊 Rapport de couverture
         if: always()
