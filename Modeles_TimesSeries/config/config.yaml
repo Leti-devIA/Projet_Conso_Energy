@@ -114,15 +114,15 @@ site_overrides:
     changepoint_range: 0.95
   '30000260159032':
     seasonality_mode: multiplicative
-    seasonality_prior_scale: 10.0
-    holidays_prior_scale: 10.0
-    daily_fourier_order: 10
-    weekly_fourier_order: 5
-    yearly_fourier_order: 10
-    growth: flat
-    changepoint_prior_scale: 0.01
+    seasonality_prior_scale: 20
+    holidays_prior_scale: 20
+    daily_fourier_order: 20
+    weekly_fourier_order: 20
+    yearly_fourier_order: 20
+    growth: linear
+    changepoint_prior_scale: 0.3
     n_changepoints: 25
-    changepoint_range: 0.95
+    changepoint_range: 0.8
   '50085238776159':
     seasonality_mode: additive
     seasonality_prior_scale: 10.0
