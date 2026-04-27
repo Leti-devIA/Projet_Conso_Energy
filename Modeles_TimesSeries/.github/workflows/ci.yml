@@ -9,7 +9,7 @@ name: CI - Tests et Validation
 # Déclenchement : à chaque push ou PR sur main/develop
 on:
   push:
-    branches: ["main", "develop"]
+    branches: ["main", "branch-ia"]
   pull_request:
     branches: ["main"]
 
