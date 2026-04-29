@@ -1,4 +1,4 @@
-# 🎯 Améliorations du Modèle Prophet - Guide Pédagogique - AZERTY
+# 🎯 Améliorations du Modèle Prophet - Guide Pédagogique - TEST LAETITIA
 
 ## 📊 État initial vs Optimisé
 
