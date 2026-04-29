@@ -1,4 +1,4 @@
-# 🎯 Améliorations du Modèle Prophet - Guide Pédagogique - TEST
+# 🎯 Améliorations du Modèle Prophet - Guide Pédagogique - 123456
 
 ## 📊 État initial vs Optimisé
 
