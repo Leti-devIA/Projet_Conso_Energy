@@ -1,231 +1,144 @@
-# Guide MLflow - Projet Consommation Énergétique
+# MLflow — Tracking et registre de modèles
 
-## 🎯 Qu'est-ce que MLflow apporte ?
+## Qu'est-ce que MLflow ?
 
-MLflow remplace TensorBoard et ajoute des fonctionnalités MLOps pour Prophet :
+MLflow est une plateforme open-source de **gestion du cycle de vie des modèles ML**. Dans ce projet, il remplit trois rôles :
 
-| Fonctionnalité | Description |
-|----------------|-------------|
-| **Tracking** | Historique de tous les entraînements avec métriques |
-| **Comparaison** | Compare facilement plusieurs modèles |
-| **Versioning** | Gestion des versions de modèles |
-| **Artéfacts** | Stockage des graphiques et rapports |
-| **Registry** | Registre centralisé des modèles |
-| **Reproductibilité** | Environnements et paramètres sauvegardés |
+1. **Tracking** : enregistrer les paramètres, métriques et artefacts de chaque entraînement.
+2. **Comparaison** : comparer visuellement plusieurs runs pour identifier le meilleur modèle.
+3. **Registry** : versionner et promouvoir des modèles (Staging → Production).
 
-## 📦 Installation
+> Pour un développeur reprenant le projet : MLflow est votre journal de bord scientifique. Chaque fois que vous entraînez un modèle, une entrée est créée avec tous les paramètres et résultats. Vous pouvez revenir en arrière, comparer et reproduire n'importe quel run.
 
-```powershell
+---
+
+## Ce qui est tracké automatiquement
+
+À chaque entraînement (`python src/train.py`), MLflow enregistre :
+
+| Catégorie | Exemples |
+|---|---|
+| Paramètres | `changepoint_prior_scale`, `seasonality_mode`, `top_n_features`, `prm` |
+| Métriques | `val_mae`, `val_rmse`, `val_mape`, `val_r2` |
+| Artefacts | Modèle Prophet `.pkl`, graphiques de prédiction, graphiques des composantes, résumé texte |
+| Tags | `prm`, `git_commit`, `python_version` |
+
+---
+
+## Installation
+
+```bash
 pip install mlflow
+# (déjà inclus dans requirements.txt)
 ```
 
-## 🚀 Utilisation
+---
 
-### 1. Entraîner avec tracking MLflow
+## Lancer l'interface web MLflow
 
-Le tracking est **automatique** lors de l'entraînement :
-
-```powershell
-python src/train.py
-```
-
-MLflow enregistre automatiquement :
-- ✅ Paramètres Prophet (seasonality_mode, prior scales...)
-- ✅ Métriques de validation (MAE, RMSE, MAPE, R²)
-- ✅ Le modèle Prophet complet
-- ✅ Graphiques des prédictions et composantes
-- ✅ Résumé texte
-
-### 2. Visualiser avec l'UI MLflow
-
-Lancer l'interface web :
-
-```powershell
+```bash
+# Depuis Modeles_TimesSeries/
 mlflow ui --port 5000
 ```
 
-Puis ouvrir dans le navigateur : **http://localhost:5000**
+Ouvrir dans le navigateur : **http://localhost:5000**
 
 Vous verrez :
-- 📊 Tableau de tous les runs avec métriques
-- 📈 Graphiques de comparaison
-- 🔍 Détails de chaque entraînement
-- 📁 Artefacts (modèles, graphiques)
 
-### 3. Comparer plusieurs modèles
+- la liste de tous les runs avec leurs métriques,
+- des graphiques de comparaison entre runs,
+- les détails (paramètres, métriques, artefacts) de chaque run,
+- la possibilité de télécharger le modèle depuis un run spécifique.
+
+---
+
+## Structure des fichiers MLflow
+
+```
+Modeles_TimesSeries/
+├── mlruns/
+│   ├── <experiment_id>/
+│   │   ├── <run_id>/
+│   │   │   ├── artifacts/          # Modèle + graphiques
+│   │   │   │   ├── model/
+│   │   │   │   ├── forecast_plot.png
+│   │   │   │   └── components_plot.png
+│   │   │   ├── metrics/            # Fichiers texte avec valeurs
+│   │   │   │   ├── val_mae
+│   │   │   │   └── val_rmse
+│   │   │   ├── params/             # Fichiers texte avec paramètres
+│   │   │   └── tags/
+│   └── .trash/
+```
+
+---
+
+## Comparer plusieurs modèles (Python)
 
 ```python
 from src.mlflow_utils import compare_models
 
-# Comparer tous les modèles par RMSE
 results = compare_models(
     experiment_name="Prophet_Energy_Forecast",
     metric="val_rmse"
 )
 
-# Affiche le meilleur modèle et le classement
-print(results[['run_id', 'metrics.val_rmse', 'metrics.val_mae', 'params.site_prm']])
+# Affiche le classement par RMSE
+print(results[["run_id", "metrics.val_rmse", "metrics.val_mae", "params.site_prm"]])
 ```
 
-### 4. Charger un modèle depuis MLflow
+---
+
+## Charger un modèle depuis un run MLflow
 
 ```python
 from src.mlflow_utils import load_model_from_mlflow
 
-# Charger le modèle d'un run spécifique
-model = load_model_from_mlflow(run_id="abc123...")
+# Charger par run_id (visible dans l'UI MLflow)
+model = load_model_from_mlflow(run_id="abc123def456...")
 
 # Faire des prédictions
+future_df = ...  # DataFrame Prophet avec colonne 'ds' + régresseurs
 forecast = model.predict(future_df)
 ```
 
-### 5. Logger des prédictions long terme
+---
+
+## Logger des prédictions long terme
 
 ```python
 from src.mlflow_utils import log_longterm_predictions
 
-# Après génération de prédictions 3 ans
 log_longterm_predictions(
-    df_predictions=predictions,
+    df_predictions=predictions_df,
     prm="30000250086126",
     nb_annees=3
 )
 ```
 
-## 📂 Structure MLflow
+---
 
-```
-Modeles_TimesSeries/
-├── mlruns/                    # Dossier MLflow
-│   ├── 0/                     # Experiment ID
-│   │   ├── <run_id>/          # Run individuel
-│   │   │   ├── artifacts/     # Modèle + graphiques
-│   │   │   ├── metrics/       # Métriques
-│   │   │   ├── params/        # Paramètres
-│   │   │   └── tags/          # Tags
-│   └── .trash/
-└── mlflow.db                  # Base de données (si backend SQL)
-```
-
-## 🔧 Configuration
-
-Voir le fichier `config/config.yaml` à la racine du projet :
+## Configuration MLflow (`config/config.yaml`)
 
 ```yaml
 mlflow:
-  tracking_uri: "mlruns"              # Local ou distant
+  tracking_uri: "mlruns"                    # Répertoire local (ou URI distante)
   experiment_name: "Prophet_Energy_Forecast"
   artifact_location: "mlruns"
 ```
 
-### Tracking distant (optionnel)
-
-Pour un serveur MLflow distant :
+Pour utiliser un serveur MLflow distant (partagé en équipe) :
 
 ```yaml
 mlflow:
   tracking_uri: "http://mlflow-server:5000"
 ```
 
-## 📊 Métriques trackées
-
-### Entraînement
-- `val_mae` : Mean Absolute Error sur validation
-- `val_rmse` : Root Mean Squared Error
-- `val_mape` : Mean Absolute Percentage Error
-- `val_r2` : Coefficient de détermination R²
-
-### Prédictions long terme
-- `pred_mean_kw` : Consommation moyenne prédite
-- `pred_std_kw` : Écart-type
-- `pred_mean_kw_2026`, `pred_mean_kw_2027`, etc. : Par année
-- `confidence_interval_width` : Largeur moyenne intervalle confiance
-
-## 🎯 Workflow type
-
-1. **Expérimenter** : Entraîner plusieurs modèles avec différents paramètres
-```powershell
-# Modifier config/config.yaml (ex: seasonality_mode: additive)
-python src/train.py
-
-# Modifier à nouveau et ré-entraîner
-python src/train.py
-```
-
-2. **Comparer** : Visualiser dans l'UI MLflow
-```powershell
-mlflow ui --port 5000
-```
-
-3. **Sélectionner** : Identifier le meilleur run
-
-4. **Déployer** : Charger le modèle et générer prédictions
-```python
-model = load_model_from_mlflow(run_id="best_run_id")
-```
-
-## 🔗 Intégration avec vos scripts
-
-### `train.py`
-✅ Déjà intégré automatiquement
-
-### `predict_longterm.py`
-Ajoutez ceci après génération des prédictions :
-
-```python
-from mlflow_utils import log_longterm_predictions
-
-# À la fin de predict_longterm()
-if MLFLOW_AVAILABLE:
-    log_longterm_predictions(df_predictions, prm=prm, nb_annees=nb_annees)
-```
-
-## 📚 Ressources
-
-- [Documentation MLflow](https://mlflow.org/docs/latest/index.html)
-- [MLflow Prophet Flavor](https://mlflow.org/docs/latest/python_api/mlflow.prophet.html)
-- [Tutoriel MLflow](https://mlflow.org/docs/latest/tutorials-and-examples/index.html)
-
-## ⚡ Commandes rapides
-
-```powershell
-# Lancer l'UI
-mlflow ui
-
-# Avec port spécifique
-mlflow ui --port 8080
-
-# Comparer modèles (Python)
-python -c "from src.mlflow_utils import compare_models; compare_models()"
-
-# Nettoyer les runs (attention !)
-# rm -r mlruns
-```
-
-## 🎁 Bonus : Registry de modèles
-
-Pour mettre un modèle en production :
-
-```python
-import mlflow
-
-# Enregistrer le meilleur modèle
-mlflow.register_model(
-    model_uri=f"runs:/{run_id}/model",
-    name="Prophet_Production"
-)
-
-# Promouvoir en production
-client = mlflow.tracking.MlflowClient()
-client.transition_model_version_stage(
-    name="Prophet_Production",
-    version=1,
-    stage="Production"
-)
-```
-
 ---
 
-**Auteur** : GitHub Copilot
-**Date** : Février 2026
-**Projet** : Prédiction Consommation Énergétique (Prophet + MLflow)
+## Bonnes pratiques
+
+- Chaque entraînement doit avoir un **nom d'expérience cohérent** (`experiment_name` dans config).
+- Toujours vérifier les métriques dans MLflow avant de valider un modèle en production.
+- Utiliser les **tags** pour filtrer facilement par PRM dans l'interface.
+- Archiver les runs non pertinents plutôt que de les supprimer (ils peuvent servir de référence).

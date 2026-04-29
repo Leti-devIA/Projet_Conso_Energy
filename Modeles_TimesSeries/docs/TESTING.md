@@ -1,243 +1,193 @@
-# Guide des Tests - Prophet Energy Forecast
+# Guide des Tests
 
-## 🚀 Démarrage rapide
+## Philosophie de test du projet
 
-### 1️⃣ Installation des dépendances de test
+Le projet suit une stratégie de test à deux niveaux :
 
-```bash
-# Installer pytest et les tools de test
-pip install -r requirements-dev.txt
+1. **Tests unitaires** (`tests/`) : vérifient que chaque module Python (`data_loader`, `preprocessing`, `feature_engineering`, `utils`) fonctionne correctement de manière isolée.
+2. **Tests d'intégration** : vérifient que l'enchaînement des modules (API → pipeline → prédiction) fonctionne de bout en bout.
 
-# Ou juste pytest si c'est tout ce que tu veux
-pip install pytest pytest-cov
+> Pour un développeur reprenant le projet : avant de modifier un module, lancez les tests pour avoir une baseline. Après modification, relancez-les pour vérifier que vous n'avez rien cassé. C'est la règle de base.
+
+---
+
+## Structure des tests
+
+```
+tests/
+├── conftest.py                     # Fixtures partagées entre tous les tests
+├── test_utils.py                   # Tests pour src/utils.py
+├── test_data_loader.py             # Tests pour src/data_loader.py
+├── test_preprocessing.py           # Tests pour src/preprocessing.py
+├── test_feature_engineering.py     # Tests pour src/feature_engineering.py
+└── README.md
 ```
 
-### 2️⃣ Lancer les tests
+### Fixtures disponibles (`conftest.py`)
+
+Les fixtures sont des objets préconstruits injectés automatiquement dans vos tests :
+
+| Fixture | Description |
+|---|---|
+| `sample_dates` | Série de dates de test |
+| `sample_dataframe` | DataFrame avec données réalistes de test |
+| `sample_config` | Dictionnaire de configuration YAML de test |
+| `temp_config_file` | Fichier YAML temporaire (supprimé après le test) |
+| `sample_prophet_data` | DataFrame au format Prophet (`ds`, `y`, régresseurs) |
+| `data_dir` | Répertoires temporaires pour les tests I/O |
+
+---
+
+## Installation des dépendances de test
 
 ```bash
-# Tous les tests (recommandé)
+pip install pytest pytest-cov pytest-xdist
+
+# Ou via requirements-dev.txt si présent
+pip install -r requirements-dev.txt
+```
+
+---
+
+## Lancer les tests
+
+### Via le script dédié (recommandé)
+
+```bash
+# Tous les tests
 python run_tests.py
 
-# Tests en parallèle (plus rapide)
+# En parallèle (plus rapide sur multi-cœurs)
 python run_tests.py --fast
 
-# Avec rapport de couverture
+# Avec rapport de couverture HTML
 python run_tests.py --coverage
 
-# Uniquement les tests unitaires
+# Tests unitaires uniquement
 python run_tests.py --unit
 
-# Mode verbose (affiche tout)
+# Mode verbeux (affiche le nom de chaque test)
 python run_tests.py -v
-
-# Ou directement avec pytest
-pytest                  # Tous les tests
-pytest -v             # Verbose
-pytest --cov=src      # Avec coverage
-pytest -n auto        # Parallèle
 ```
 
-### 3️⃣ Voir le rapport de couverture
+### Directement avec pytest
 
-Après avoir lancé `python run_tests.py --coverage` :
+```bash
+# Tous les tests
+pytest
+
+# Verbose
+pytest -v
+
+# Avec couverture de code
+pytest --cov=src
+
+# En parallèle
+pytest -n auto
+
+# Un fichier spécifique
+pytest tests/test_utils.py
+
+# Une classe spécifique
+pytest tests/test_utils.py::TestLoadConfig
+
+# Une fonction spécifique
+pytest tests/test_utils.py::TestLoadConfig::test_load_config_with_valid_file
+```
+
+---
+
+## Rapport de couverture
+
+```bash
+python run_tests.py --coverage
+```
+
+Puis ouvrir le rapport HTML :
 
 ```bash
 # Windows
 start htmlcov/index.html
 
-# Mac
+# macOS
 open htmlcov/index.html
 
 # Linux
 xdg-open htmlcov/index.html
 ```
 
-## 🔧 Structure des tests
+Le rapport indique quelle fraction du code est couverte par les tests. L'objectif du projet est de maintenir une couverture > 70% sur les modules `src/`.
 
-```
-tests/
-├── conftest.py                 # Fixtures réutilisables
-├── test_utils.py              # Tests pour utils.py
-├── test_data_loader.py        # Tests pour data_loader.py
-├── test_preprocessing.py       # Tests pour preprocessing.py
-├── test_feature_engineering.py # Tests pour feature_engineering.py
-└── README.md                   # Documentation détaillée
+---
+
+## Écrire un nouveau test
+
+### Structure recommandée
+
+```python
+# tests/test_mon_module.py
+
+import pytest
+from src.mon_module import ma_fonction
+
+class TestMaFonction:
+
+    def test_cas_nominal(self, sample_dataframe):
+        # Arrange — préparer les données
+        df = sample_dataframe
+
+        # Act — appeler la fonction
+        result = ma_fonction(df)
+
+        # Assert — vérifier le résultat
+        assert result is not None
+        assert len(result) > 0
+
+    def test_cas_erreur(self):
+        # Vérifier qu'une exception est bien levée
+        with pytest.raises(ValueError):
+            ma_fonction(None)
 ```
 
-## 📝 Exemples de commandes
+### Bonnes pratiques
+
+| Bonne pratique | Exemple |
+|---|---|
+| Noms explicites | `test_load_config_returns_dict_with_prophet_key` |
+| Une responsabilité par test | Un test = un comportement vérifié |
+| Utilisez les fixtures | Ne reconstruisez pas les données dans chaque test |
+| Testez les cas d'erreur | Vérifier les exceptions est aussi important que les cas nominaux |
+| Tests rapides | Évitez les vraies connexions DB dans les tests unitaires (mocker) |
+
+---
+
+## Commandes pytest utiles
 
 ```bash
-# Tests d'un fichier spécifique
-pytest tests/test_utils.py
-
-# Tests d'une classe spécifique
-pytest tests/test_utils.py::TestLoadConfig
-
-# Tests d'une fonction spécifique
-pytest tests/test_utils.py::TestLoadConfig::test_load_config_with_valid_file
-
-# Tests sans affichage des print (plus rapide)
-pytest tests/
-
-# Tests avec affichage des print (pour debug)
-pytest tests/ -s
-
-# Tests lents aussi
-pytest tests/ -m "not slow"
-
 # Afficher les 10 tests les plus lents
 pytest --durations=10
+
+# Ne pas capturer les print (utile pour debug)
+pytest -s
+
+# Exclure les tests lents
+pytest -m "not slow"
+
+# Stopper au premier échec
+pytest -x
 ```
 
-## 🧪 Fixtures disponibles
+---
 
-Toutes les fixtures sont dans `tests/conftest.py` :
+## Intégration en CI
 
-- `sample_dates` : Série de dates
-- `sample_dataframe` : DataFrame avec données de test
-- `sample_config` : Configuration YAML de test
-- `temp_config_file` : Fichier config temporaire
-- `sample_prophet_data` : DataFrame format Prophet
-- `data_dir` : Répertoires temporaires
+Les tests sont exécutés automatiquement à chaque `git push` via GitHub Actions (voir [Guide CI/CD](GUIDE_CICD.md)).
 
-Exemple d'utilisation :
-```python
-def test_something(sample_dataframe):
-    # sample_dataframe est automatiquement injecté
-    assert len(sample_dataframe) > 0
-```
+Le workflow CI :
 
-## ✅ Bonnes pratiques
+1. installe Python 3.11 et les dépendances,
+2. vérifie la syntaxe avec flake8/ruff,
+3. lance `pytest --cov=src`,
+4. affiche le rapport de couverture dans les logs GitHub Actions.
 
-1. **Écrire des tests dès le début** : Un test = une responsabilité
-2. **Noms explicites** :
-   ```python
-   # ✅ Bon
-   def test_load_config_returns_dict_with_prophet_key():
-       pass
-
-   # ❌ Mauvais
-   def test_1():
-       pass
-   ```
-
-3. **Utiliser les fixtures** :
-   ```python
-   # ✅ Bon (réutilise sample_dataframe)
-   def test_with_data(sample_dataframe):
-       pass
-
-   # ❌ Mauvais (crée un nouveau DF à chaque fois)
-   def test_with_data():
-       df = pd.DataFrame(...)
-       pass
-   ```
-
-4. **Tester les cas d'erreur** :
-   ```python
-   def test_error_handling():
-       with pytest.raises(FileNotFoundError):
-           load_config("nonexistent.yaml")
-   ```
-
-5. **Grouper les tests logiquement** :
-   ```python
-   class TestLoadConfig:
-       def test_basic(self): pass
-       def test_error(self): pass
-   ```
-
-## 🔍 Ajouter des tests
-
-Pour ajouter des tests à un nouveau module :
-
-1. Crée un fichier `tests/test_module_name.py`
-2. Ajoute des classes `class Test*`
-3. Ajoute des méthodes `def test_*()`
-4. Utilise les fixtures du conftest.py
-
-Exemple :
-```python
-import pytest
-from src.my_module import my_function
-
-class TestMyFunction:
-    def test_basic_case(self):
-        result = my_function(5)
-        assert result == 10
-
-    def test_error_case(self):
-        with pytest.raises(ValueError):
-            my_function(-5)
-
-    def test_with_fixture(self, sample_dataframe):
-        # Utilise une fixture
-        assert len(sample_dataframe) > 0
-        result = my_function(sample_dataframe)
-        assert result is not None
-```
-
-## 📊 Rapports et Métriques
-
-### Coverage Report
-```bash
-pytest --cov=src --cov-report=html
-# Ouvre htmlcov/index.html pour voir le détail par fichier
-```
-
-### Rapport JUnit XML (pour CI/CD)
-```bash
-pytest --junit-xml=test-results.xml
-```
-
-### Tests les plus lents
-```bash
-pytest --durations=10  # Top 10 des tests les plus lents
-```
-
-## 🐛 Troubleshooting
-
-### Les tests ne trouvent pas les modules
-- Assure-toi que `sys.path.insert(0, ...)` est correct dans conftest.py
-- Essaie : `python -m pytest tests/` au lieu de `pytest tests/`
-
-### Les tests prennent trop de temps
-```bash
-# Utilise la parallélisation
-pip install pytest-xdist
-pytest -n auto
-```
-
-### TestError pendant l'import
-```bash
-# Mode verbose pour voir l'erreur exacte
-pytest --tb=long -v
-```
-
-### Une fixture n'est pas trouvée
-- Vérifie que conftest.py est dans le dossier `tests/` ou parent
-- Redémarre ton IDE/terminal
-
-## 🚦 CI/CD
-
-Pour intégrer les tests dans un pipeline (GitHub Actions, GitLab CI, etc.) :
-
-```yaml
-- name: Run tests
-  run: pytest --junit-xml=results.xml --cov=src --cov-report=xml
-
-- name: Upload coverage
-  uses: codecov/codecov-action@v3
-```
-
-## 📚 Ressources
-
-- [Documentation pytest](https://docs.pytest.org/)
-- [pytest fixtures](https://docs.pytest.org/en/stable/fixture.html)
-- [pytest plugins](https://docs.pytest.org/en/latest/plugins.html)
-
-## Questions ?
-
-Pour toute question sur les tests, consulte :
-- `tests/README.md` pour la doc détaillée
-- Exemples dans `tests/test_*.py`
+Si les tests échouent, une croix rouge s'affiche sur le commit GitHub et le déploiement est bloqué.

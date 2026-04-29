@@ -1,231 +1,141 @@
-# 🚀 Guide CI/CD - Démarrage Rapide
+# CI/CD — Intégration et Déploiement Continus
 
-## ✅ Ce qui a été configuré
+## Qu'est-ce que le CI/CD ?
 
-Votre projet dispose maintenant d'un système CI/CD complet :
+Le **CI (Continuous Integration)** automatise les vérifications à chaque commit :
 
-### 📦 4 Workflows GitHub Actions
+- les tests passent-ils ?
+- le code respecte-t-il les conventions de style ?
 
-1. **`ci.yml`** → Tests automatiques à chaque commit
-2. **`cd-api-dataclean.yml`** → Déploiement API de nettoyage
-3. **`cd-api-inference.yml`** → Déploiement API de prédiction
-4. **`cd-dashboard.yml`** → Déploiement du dashboard Streamlit
+Le **CD (Continuous Deployment)** automatise la construction et la mise à disposition des artefacts (images Docker) après validation.
 
-### 🛠️ 3 Scripts Utilitaires
-
-1. **`run_ci_tests.sh`** → Teste en local avant de push
-2. **`build_and_push.sh`** → Build et push les images Docker
-3. **`deploy.sh`** → Déploie tout le projet en local
+> Pour un développeur reprenant le projet : le CI/CD est votre filet de sécurité. Si vous cassez quelque chose, GitHub vous le dit avant que ça n'arrive en production.
 
 ---
 
-## 🎯 Utilisation en 3 Étapes
+## Workflows GitHub Actions
 
-### Étape 1 : Configurer les Secrets GitHub
+Le projet contient 4 workflows dans `.github/workflows/` :
 
-Sur GitHub, allez dans **Settings** → **Secrets and variables** → **Actions**
-
-Ajoutez ces 2 secrets minimum :
-- `DOCKER_USERNAME` : votre nom sur Docker Hub
-- `DOCKER_PASSWORD` : votre mot de passe Docker Hub
-
-> **Pas de compte Docker Hub ?** Créez-en un gratuitement : https://hub.docker.com
+| Fichier | Déclencheur | Rôle |
+|---|---|---|
+| `ci.yml` | Chaque `git push` | Tests unitaires + linting |
+| `cd-api-dataclean.yml` | Manuel ou push `main` | Build + push image `api-dataclean` |
+| `cd-api-inference.yml` | Manuel ou push `main` | Build + push image `api-inference` |
+| `cd-dashboard.yml` | Manuel ou push `main` | Build + push image `dashboard` |
 
 ---
 
-### Étape 2 : Tester en Local
+## Workflow CI (`ci.yml`) — Détail
+
+À chaque commit pushé, GitHub Actions :
+
+1. Démarre un runner Ubuntu.
+2. Checkout du code.
+3. Installation de Python 3.11.
+4. Installation des dépendances (`pip install -r requirements.txt`).
+5. Vérification du style (`flake8` ou `ruff`).
+6. Lancement des tests (`pytest --cov=src`).
+7. Affichage du rapport de couverture.
+
+**Résultat visible :** un badge ✅ ou ❌ apparaît sur chaque commit dans l'onglet GitHub Actions.
+
+---
+
+## Workflow CD — Détail
+
+Quand le workflow de déploiement est déclenché :
+
+1. Build de l'image Docker du service concerné.
+2. Authentification sur Docker Hub avec les secrets GitHub.
+3. Push de l'image sur Docker Hub.
+
+L'image est ensuite disponible pour déploiement sur n'importe quel serveur avec `docker pull`.
+
+---
+
+## Configuration initiale (à faire une seule fois)
+
+### 1. Configurer les secrets GitHub
+
+Aller dans le dépôt GitHub → **Settings** → **Secrets and variables** → **Actions**.
+
+Ajouter obligatoirement :
+
+| Secret | Valeur |
+|---|---|
+| `DOCKER_USERNAME` | Votre nom d'utilisateur Docker Hub |
+| `DOCKER_PASSWORD` | Votre mot de passe Docker Hub |
+
+Sans ces secrets, les workflows CD échouent. Les secrets ne sont jamais visibles en clair dans les logs.
+
+### 2. Créer un compte Docker Hub (si nécessaire)
+
+[https://hub.docker.com](https://hub.docker.com) — gratuit pour les images publiques.
+
+---
+
+## Tester le CI en local avant de pusher
 
 ```bash
-# Testez que tout fonctionne avant de push
+# Script qui exécute localement les mêmes vérifications que le workflow CI
 bash scripts/run_ci_tests.sh
 ```
 
-Si ça passe ✅, vous êtes prêt à push !
+Si ce script passe ✅ en local, le pipeline GitHub Actions passera aussi.
 
 ---
 
-### Étape 3 : Push et Regarder la Magie Opérer
+## Scripts utilitaires
+
+| Script | Rôle |
+|---|---|
+| `scripts/run_ci_tests.sh` | Teste en local (tests + linting) |
+| `scripts/build_and_push.sh` | Build et push les images Docker manuellement |
+| `scripts/deploy.sh` | Déploie tout le projet en local |
+
+---
+
+## Flux recommandé
+
+```
+1. Développer sur une branche feature/fix
+       │
+       ▼
+2. git push origin ma-branche
+  → GitHub Actions CI démarre automatiquement
+       │
+       ▼
+3. Tests passent ✅ → ouvrir Pull Request
+  Tests échouent ❌ → corriger et re-pusher
+       │
+       ▼
+4. Merge sur main
+  → Workflows CD déclenchés
+  → Images Docker buildées et pushées sur Docker Hub
+       │
+       ▼
+5. Déploiement serveur : docker pull + docker compose up
+```
+
+---
+
+## Fichier `docker-compose.ci.yml`
+
+Ce fichier est utilisé uniquement pendant la CI. Il démarre les services sans les données réelles ni les connexions Fabric, pour permettre aux tests de tourner dans un environnement contrôlé.
 
 ```bash
-git add .
-git commit -m "feat: ajout CI/CD"
-git push origin main
+# Lancer la suite de tests via Docker Compose CI
+docker compose -f docker-compose.ci.yml up --abort-on-container-exit
 ```
 
-Puis allez sur **GitHub** → **Actions** → Voyez les tests se lancer automatiquement ! 🎉
-
 ---
 
-## 📊 Workflows Expliqués Simplement
+## Dépannage CI/CD
 
-### CI - Tests Automatiques (`ci.yml`)
-
-**Quand ?** À chaque `git push`
-
-**Fait quoi ?**
-```
-1. Installe Python + dépendances
-2. Vérifie le code (flake8, ruff)
-3. Lance les tests unitaires
-4. Affiche la couverture de code
-```
-
-**Résultat :** Badge ✅ ou ❌ visible sur GitHub
-
----
-
-### CD - Déploiement (`cd-*.yml`)
-
-**Quand ?** Manuellement OU automatiquement si code change
-
-**Fait quoi ?**
-```
-1. Build une image Docker
-2. Push sur Docker Hub
-3. Prêt pour déploiement
-```
-
-**Résultat :** Vos APIs sont déployables en un clic
-
----
-
-## 🎓 Pour Votre Certification
-
-### Points Clés à Présenter
-
-✅ **Pipeline CI/CD complète**
-- Tests automatiques
-- Linting du code
-- Déploiement Docker automatisé
-
-✅ **Bonnes Pratiques**
-- Secrets sécurisés dans GitHub
-- Tests avant déploiement
-- Workflows séparés par service
-
-✅ **Démonstration Live**
-1. Montrez les workflows sur GitHub Actions
-2. Faites un commit → les tests se lancent
-3. Montrez les images sur Docker Hub
-
----
-
-## 🧪 Commandes Utiles
-
-### Tests en Local
-
-```bash
-# Tous les tests du workflow CI
-bash scripts/run_ci_tests.sh
-
-# Seulement les tests unitaires
-pytest tests/ -v
-
-# Seulement le linting
-flake8 src/
-```
-
-### Docker en Local
-
-```bash
-# Déployer tout le projet
-bash scripts/deploy.sh
-
-# Build et push vers Docker Hub
-export DOCKER_USERNAME="votre-username"
-bash scripts/build_and_push.sh
-
-# Voir les logs
-docker-compose logs -f
-```
-
-### Workflows Manuels
-
-Sur GitHub → **Actions** → Choisir un workflow → **Run workflow**
-
----
-
-## 🔍 Comprendre les Erreurs
-
-### ❌ "Connexion Docker Hub failed"
-**Solution :** Vérifiez vos secrets `DOCKER_USERNAME` et `DOCKER_PASSWORD`
-
-### ❌ "Tests failed"
-**Solution :**
-1. Lancez `bash scripts/run_ci_tests.sh` en local
-2. Corrigez les tests qui échouent
-3. Re-push
-
-### ❌ "Build failed"
-**Solution :**
-1. Testez le build Docker en local : `cd api/api-dataclean && docker build .`
-2. Vérifiez le `Dockerfile`
-
----
-
-## 📝 Checklist Certification
-
-Avant votre présentation, vérifiez :
-
-- [ ] Les workflows CI/CD fonctionnent
-- [ ] Au moins 1 workflow a été exécuté avec succès
-- [ ] Les secrets sont configurés
-- [ ] Vous comprenez chaque étape des workflows
-- [ ] Vous pouvez expliquer CI vs CD
-- [ ] Badge CI ajouté au README (optionnel)
-
----
-
-## 🎁 Badge CI pour le README
-
-Ajoutez ce badge au début de votre `README.md` :
-
-```markdown
-![CI](https://github.com/USERNAME/REPO/workflows/CI%20-%20Tests%20et%20Validation/badge.svg)
-```
-
-Remplacez `USERNAME` et `REPO` par vos vraies valeurs.
-
----
-
-## 📚 Pour Aller Plus Loin
-
-### Sujets Avancés (Bonus Certification)
-
-- **Déploiement Cloud** : Azure, AWS, GCP
-- **Monitoring** : Grafana, Prometheus
-- **Notifications** : Slack, Discord
-- **Tests de Performance** : Locust, k6
-- **Sécurité** : Scan de vulnérabilités (Trivy)
-
-### Ressources
-
-- [GitHub Actions Docs](https://docs.github.com/fr/actions)
-- [Docker Docs](https://docs.docker.com)
-- [CI/CD Best Practices](https://github.com/features/actions)
-
----
-
-## ❓ Questions Fréquentes
-
-**Q : C'est quoi la différence entre CI et CD ?**
-R : **CI** teste le code, **CD** le déploie. CI = qualité, CD = livraison.
-
-**Q : Dois-je payer pour GitHub Actions ?**
-R : Non, c'est gratuit pour les repos publics et limité pour les privés.
-
-**Q : Puis-je utiliser GitLab CI au lieu de GitHub Actions ?**
-R : Oui ! La logique est similaire, seule la syntaxe change.
-
-**Q : Combien de temps prend un workflow ?**
-R : CI ≈ 2-5 min | CD ≈ 5-10 min (dépend de la taille des images)
-
----
-
-**🎉 Bravo ! Vous avez un vrai CI/CD professionnel !**
-
-**Besoin d'aide ?** Lisez `.github/workflows/README.md` pour plus de détails.
-
----
-
-*Guide créé avec le skill étudiant 🎓*
+| Problème | Solution |
+|---|---|
+| Tests échouent sur GitHub mais passent en local | Vérifier les versions de dépendances (utiliser `pip freeze`) |
+| Build Docker échoue | Vérifier `DOCKER_USERNAME` et `DOCKER_PASSWORD` dans les secrets |
+| Workflow ne se déclenche pas | Vérifier le `on:` du fichier YAML (branche correcte ?) |
+| Coverage trop basse | Écrire des tests pour les modules non couverts |
