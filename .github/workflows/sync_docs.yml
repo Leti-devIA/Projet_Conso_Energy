@@ -24,8 +24,9 @@ jobs:
 
       - name: Copier les docs
         run: |
+          mkdir -p shared-docs/docs/projet-conso-energ
           rsync -av --delete \
-            docs/ \
+            Modeles_TimesSeries/docs/ \
             shared-docs/docs/projet-conso-energ/
 
       - name: Commit & push
