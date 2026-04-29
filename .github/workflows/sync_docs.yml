@@ -2,8 +2,7 @@ name: Sync docs to shared repo
 
 on:
   push:
-    branches:
-      - main
+    branches: ["main", "branch-ia"]
     paths:
       - 'Modeles_TimesSeries/docs/**'   # déclenche si les docs du projet changent
       - '**.md'
