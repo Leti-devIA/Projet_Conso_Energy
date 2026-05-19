@@ -64,6 +64,43 @@ def create_rolling_features(df, target_col, windows=DEFAULT_ROLLING_WINDOWS):
         df[f'{prefix}_roll_{window}'] = df[target_col].shift(1).rolling(window=window).mean()
     return df
 
+# ...existing code...
+
+def create_thermal_features(df):
+    """
+    Variables thermiques orientées pics hivernaux.
+    """
+    df = df.copy()
+
+    if 'datetime' not in df.columns or 'temperature' not in df.columns:
+        return df
+
+    dt = df['datetime']
+    temp = df['temperature']
+
+    df['dju_chauffage'] = (18 - temp).clip(lower=0)
+    df['grand_froid'] = (temp <= 0).astype(int)
+
+    df['mois_hivernal'] = dt.dt.month.isin([11, 12, 1, 2, 3]).astype(int)
+    df['jour_ouvre'] = (~dt.dt.dayofweek.isin([5, 6])).astype(int)
+    df['heure_pointe'] = dt.dt.hour.isin([7, 8, 9, 18, 19]).astype(int)
+
+    df['is_peak_winter_hour'] = (
+        (df['mois_hivernal'] == 1) &
+        (df['jour_ouvre'] == 1) &
+        (df['heure_pointe'] == 1)
+    ).astype(int)
+
+    df['dju_peak_winter'] = df['dju_chauffage'] * df['is_peak_winter_hour']
+
+    df['temp_min_24h'] = temp.rolling(24, min_periods=1).min()
+    df['temp_min_48h'] = temp.rolling(48, min_periods=1).min()
+
+    df['dju_rolling_24h'] = df['dju_chauffage'].rolling(24, min_periods=1).mean()
+    df['dju_rolling_48h'] = df['dju_chauffage'].rolling(48, min_periods=1).mean()
+
+    return df
+
 
 def create_statistical_features(df, target_col):
     df = df.copy()
@@ -156,6 +193,7 @@ def feature_engineering_pipeline(prm: str, source="csv", config_path="config/con
     df = create_rolling_features(df, target_col)
     df = create_statistical_features(df, target_col)
     df = create_interaction_features(df)
+    df = create_thermal_features(df)
     df = create_holiday_features(df)
     df, config = add_logistic_cap_floor(df, config, prm=prm, config_path=config_path)
 

@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Guide tests - Projet Modèles Time Series</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; background: #fafafa; color: #1f2937; }
+      header { background: #ffffff; border-bottom: 1px solid #e5e7eb; padding: 12px 20px; }
+      main { max-width: 960px; margin: 24px auto; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 24px; }
+      h1, h2, h3 { color: #111827; }
+      a { color: #2563eb; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      code { background: #f3f4f6; padding: 2px 5px; border-radius: 4px; }
+      pre code { display: block; padding: 12px; overflow-x: auto; }
+      nav a { margin-right: 12px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>Projet Modèles Time Series</strong>
+      <nav style="margin-top: 8px;">
+        
+          
+            <a href="..">Accueil</a>
+          
+            <a href="../QUICK_START/">Quick start</a>
+          
+            <a href="../DATA_ARCHITECTURE/">Architecture des données</a>
+          
+            <a href="../WORKFLOW_MULTI_SITES/">Workflow multi-sites</a>
+          
+            <a href="../GUIDE_PREDICTIONS_LONGTERM/">Guide prédictions long terme</a>
+          
+            <a href="../DASHBOARD_GUIDE/">Guide dashboard</a>
+          
+            <a href="../MLFLOW_GUIDE/">Guide MLflow</a>
+          
+            <a href="../GUIDE_CICD/">Guide CI/CD</a>
+          
+            <a href="./">Guide tests</a>
+          
+            <a href="../GRID_SEARCH_GUIDE/">Guide grid search</a>
+          
+            <a href="../FORMULE_COUT_HORAIRE/">Formule coût horaire</a>
+          
+            <a href="../AMELIORATIONS_PROPHET/">Améliorations Prophet</a>
+          
+        
+      </nav>
+    </header>
+
+    <main>
+      <h1 id="guide-des-tests-prophet-energy-forecast">Guide des Tests - Prophet Energy Forecast<a class="headerlink" href="#guide-des-tests-prophet-energy-forecast" title="Permanent link">&para;</a></h1>
+<h2 id="demarrage-rapide">🚀 Démarrage rapide<a class="headerlink" href="#demarrage-rapide" title="Permanent link">&para;</a></h2>
+<h3 id="1-installation-des-dependances-de-test">1️⃣ Installation des dépendances de test<a class="headerlink" href="#1-installation-des-dependances-de-test" title="Permanent link">&para;</a></h3>
+<pre><code class="language-bash"># Installer pytest et les tools de test
+pip install -r requirements-dev.txt
+
+# Ou juste pytest si c'est tout ce que tu veux
+pip install pytest pytest-cov
+</code></pre>
+<h3 id="2-lancer-les-tests">2️⃣ Lancer les tests<a class="headerlink" href="#2-lancer-les-tests" title="Permanent link">&para;</a></h3>
+<pre><code class="language-bash"># Tous les tests (recommandé)
+python run_tests.py
+
+# Tests en parallèle (plus rapide)
+python run_tests.py --fast
+
+# Avec rapport de couverture
+python run_tests.py --coverage
+
+# Uniquement les tests unitaires
+python run_tests.py --unit
+
+# Mode verbose (affiche tout)
+python run_tests.py -v
+
+# Ou directement avec pytest
+pytest                  # Tous les tests
+pytest -v             # Verbose
+pytest --cov=src      # Avec coverage
+pytest -n auto        # Parallèle
+</code></pre>
+<h3 id="3-voir-le-rapport-de-couverture">3️⃣ Voir le rapport de couverture<a class="headerlink" href="#3-voir-le-rapport-de-couverture" title="Permanent link">&para;</a></h3>
+<p>Après avoir lancé <code>python run_tests.py --coverage</code> :</p>
+<pre><code class="language-bash"># Windows
+start htmlcov/index.html
+
+# Mac
+open htmlcov/index.html
+
+# Linux
+xdg-open htmlcov/index.html
+</code></pre>
+<h2 id="structure-des-tests">🔧 Structure des tests<a class="headerlink" href="#structure-des-tests" title="Permanent link">&para;</a></h2>
+<pre><code>tests/
+├── conftest.py                 # Fixtures réutilisables
+├── test_utils.py              # Tests pour utils.py
+├── test_data_loader.py        # Tests pour data_loader.py
+├── test_preprocessing.py       # Tests pour preprocessing.py
+├── test_feature_engineering.py # Tests pour feature_engineering.py
+└── README.md                   # Documentation détaillée
+</code></pre>
+<h2 id="exemples-de-commandes">📝 Exemples de commandes<a class="headerlink" href="#exemples-de-commandes" title="Permanent link">&para;</a></h2>
+<pre><code class="language-bash"># Tests d'un fichier spécifique
+pytest tests/test_utils.py
+
+# Tests d'une classe spécifique
+pytest tests/test_utils.py::TestLoadConfig
+
+# Tests d'une fonction spécifique
+pytest tests/test_utils.py::TestLoadConfig::test_load_config_with_valid_file
+
+# Tests sans affichage des print (plus rapide)
+pytest tests/
+
+# Tests avec affichage des print (pour debug)
+pytest tests/ -s
+
+# Tests lents aussi
+pytest tests/ -m &quot;not slow&quot;
+
+# Afficher les 10 tests les plus lents
+pytest --durations=10
+</code></pre>
+<h2 id="fixtures-disponibles">🧪 Fixtures disponibles<a class="headerlink" href="#fixtures-disponibles" title="Permanent link">&para;</a></h2>
+<p>Toutes les fixtures sont dans <code>tests/conftest.py</code> :</p>
+<ul>
+<li><code>sample_dates</code> : Série de dates</li>
+<li><code>sample_dataframe</code> : DataFrame avec données de test</li>
+<li><code>sample_config</code> : Configuration YAML de test</li>
+<li><code>temp_config_file</code> : Fichier config temporaire</li>
+<li><code>sample_prophet_data</code> : DataFrame format Prophet</li>
+<li><code>data_dir</code> : Répertoires temporaires</li>
+</ul>
+<p>Exemple d'utilisation :</p>
+<pre><code class="language-python">def test_something(sample_dataframe):
+    # sample_dataframe est automatiquement injecté
+    assert len(sample_dataframe) &gt; 0
+</code></pre>
+<h2 id="bonnes-pratiques">✅ Bonnes pratiques<a class="headerlink" href="#bonnes-pratiques" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Écrire des tests dès le début</strong> : Un test = une responsabilité</li>
+<li><strong>Noms explicites</strong> :
+   ```python
+   # ✅ Bon
+   def test_load_config_returns_dict_with_prophet_key():
+       pass</li>
+</ol>
+<p># ❌ Mauvais
+   def test_1():
+       pass
+   ```</p>
+<ol>
+<li><strong>Utiliser les fixtures</strong> :
+   ```python
+   # ✅ Bon (réutilise sample_dataframe)
+   def test_with_data(sample_dataframe):
+       pass</li>
+</ol>
+<p># ❌ Mauvais (crée un nouveau DF à chaque fois)
+   def test_with_data():
+       df = pd.DataFrame(...)
+       pass
+   ```</p>
+<ol>
+<li>
+<p><strong>Tester les cas d'erreur</strong> :
+   <code>python
+   def test_error_handling():
+       with pytest.raises(FileNotFoundError):
+           load_config("nonexistent.yaml")</code></p>
+</li>
+<li>
+<p><strong>Grouper les tests logiquement</strong> :
+   <code>python
+   class TestLoadConfig:
+       def test_basic(self): pass
+       def test_error(self): pass</code></p>
+</li>
+</ol>
+<h2 id="ajouter-des-tests">🔍 Ajouter des tests<a class="headerlink" href="#ajouter-des-tests" title="Permanent link">&para;</a></h2>
+<p>Pour ajouter des tests à un nouveau module :</p>
+<ol>
+<li>Crée un fichier <code>tests/test_module_name.py</code></li>
+<li>Ajoute des classes <code>class Test*</code></li>
+<li>Ajoute des méthodes <code>def test_*()</code></li>
+<li>Utilise les fixtures du conftest.py</li>
+</ol>
+<p>Exemple :</p>
+<pre><code class="language-python">import pytest
+from src.my_module import my_function
+
+class TestMyFunction:
+    def test_basic_case(self):
+        result = my_function(5)
+        assert result == 10
+
+    def test_error_case(self):
+        with pytest.raises(ValueError):
+            my_function(-5)
+
+    def test_with_fixture(self, sample_dataframe):
+        # Utilise une fixture
+        assert len(sample_dataframe) &gt; 0
+        result = my_function(sample_dataframe)
+        assert result is not None
+</code></pre>
+<h2 id="rapports-et-metriques">📊 Rapports et Métriques<a class="headerlink" href="#rapports-et-metriques" title="Permanent link">&para;</a></h2>
+<h3 id="coverage-report">Coverage Report<a class="headerlink" href="#coverage-report" title="Permanent link">&para;</a></h3>
+<pre><code class="language-bash">pytest --cov=src --cov-report=html
+# Ouvre htmlcov/index.html pour voir le détail par fichier
+</code></pre>
+<h3 id="rapport-junit-xml-pour-cicd">Rapport JUnit XML (pour CI/CD)<a class="headerlink" href="#rapport-junit-xml-pour-cicd" title="Permanent link">&para;</a></h3>
+<pre><code class="language-bash">pytest --junit-xml=test-results.xml
+</code></pre>
+<h3 id="tests-les-plus-lents">Tests les plus lents<a class="headerlink" href="#tests-les-plus-lents" title="Permanent link">&para;</a></h3>
+<pre><code class="language-bash">pytest --durations=10  # Top 10 des tests les plus lents
+</code></pre>
+<h2 id="troubleshooting">🐛 Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
+<h3 id="les-tests-ne-trouvent-pas-les-modules">Les tests ne trouvent pas les modules<a class="headerlink" href="#les-tests-ne-trouvent-pas-les-modules" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Assure-toi que <code>sys.path.insert(0, ...)</code> est correct dans conftest.py</li>
+<li>Essaie : <code>python -m pytest tests/</code> au lieu de <code>pytest tests/</code></li>
+</ul>
+<h3 id="les-tests-prennent-trop-de-temps">Les tests prennent trop de temps<a class="headerlink" href="#les-tests-prennent-trop-de-temps" title="Permanent link">&para;</a></h3>
+<pre><code class="language-bash"># Utilise la parallélisation
+pip install pytest-xdist
+pytest -n auto
+</code></pre>
+<h3 id="testerror-pendant-limport">TestError pendant l'import<a class="headerlink" href="#testerror-pendant-limport" title="Permanent link">&para;</a></h3>
+<pre><code class="language-bash"># Mode verbose pour voir l'erreur exacte
+pytest --tb=long -v
+</code></pre>
+<h3 id="une-fixture-nest-pas-trouvee">Une fixture n'est pas trouvée<a class="headerlink" href="#une-fixture-nest-pas-trouvee" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Vérifie que conftest.py est dans le dossier <code>tests/</code> ou parent</li>
+<li>Redémarre ton IDE/terminal</li>
+</ul>
+<h2 id="cicd">🚦 CI/CD<a class="headerlink" href="#cicd" title="Permanent link">&para;</a></h2>
+<p>Pour intégrer les tests dans un pipeline (GitHub Actions, GitLab CI, etc.) :</p>
+<pre><code class="language-yaml">- name: Run tests
+  run: pytest --junit-xml=results.xml --cov=src --cov-report=xml
+
+- name: Upload coverage
+  uses: codecov/codecov-action@v3
+</code></pre>
+<h2 id="ressources">📚 Ressources<a class="headerlink" href="#ressources" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="https://docs.pytest.org/">Documentation pytest</a></li>
+<li><a href="https://docs.pytest.org/en/stable/fixture.html">pytest fixtures</a></li>
+<li><a href="https://docs.pytest.org/en/latest/plugins.html">pytest plugins</a></li>
+</ul>
+<h2 id="questions">Questions ?<a class="headerlink" href="#questions" title="Permanent link">&para;</a></h2>
+<p>Pour toute question sur les tests, consulte :
+- <code>tests/README.md</code> pour la doc détaillée
+- Exemples dans <code>tests/test_*.py</code></p>
+    </main>
+  </body>
+</html>

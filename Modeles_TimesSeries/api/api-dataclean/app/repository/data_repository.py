@@ -1,16 +1,18 @@
 def get_rows_by_prm(connection, prm: str):
-    cursor = connection.cursor()
-
     query = """
         SELECT *
         FROM dbo.ENEDIS_METEO_CLEAN
         WHERE prm = ?
         ORDER BY datetime
     """
-    cursor.execute(query, (prm,))
-
-    columns = [col[0] for col in cursor.description]
-    return cursor, columns
+    cursor = connection.cursor()
+    try:
+        cursor.execute(query, (prm,))
+        columns = [col[0] for col in cursor.description]
+        rows = cursor.fetchall()
+        return [dict(zip(columns, row)) for row in rows]
+    finally:
+        cursor.close()
 
 
 def get_rows_by_prms(connection, prms: list[str]):
@@ -29,7 +31,7 @@ def get_rows_by_prms(connection, prms: list[str]):
     cursor.execute(query, tuple(prms))
 
     columns = [col[0] for col in cursor.description]
-    return cursor, columns
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
 def get_all_previsions_meteo(connection):
@@ -42,7 +44,7 @@ def get_all_previsions_meteo(connection):
     cursor.execute(query)
 
     columns = [col[0] for col in cursor.description]
-    return cursor, columns
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
 def get_all_sites(connection):
@@ -55,7 +57,7 @@ def get_all_sites(connection):
     cursor.execute(query)
 
     columns = [col[0] for col in cursor.description]
-    return cursor, columns
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
 def get_all_prix_spot(connection):
@@ -68,4 +70,4 @@ def get_all_prix_spot(connection):
     cursor.execute(query)
 
     columns = [col[0] for col in cursor.description]
-    return cursor, columns
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]

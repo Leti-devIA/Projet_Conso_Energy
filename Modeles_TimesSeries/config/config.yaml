@@ -32,6 +32,8 @@ prophet:
   - temp_x_heure_cos
   - puissance_lag_24
   - puissance_lag_168
+  - dju_chauffage
+  - grand_froid
   filter_low_values:
     enabled: true
     threshold_kw: 20
@@ -114,15 +116,15 @@ site_overrides:
     changepoint_range: 0.95
   '30000260159032':
     seasonality_mode: multiplicative
-    seasonality_prior_scale: 20
-    holidays_prior_scale: 20
-    daily_fourier_order: 20
-    weekly_fourier_order: 20
-    yearly_fourier_order: 20
-    growth: linear
-    changepoint_prior_scale: 0.3
-    n_changepoints: 25
-    changepoint_range: 0.8
+    seasonality_prior_scale: 1.0
+    holidays_prior_scale: 1
+    daily_fourier_order: 18
+    weekly_fourier_order: 3
+    yearly_fourier_order: 15
+    growth: flat
+    changepoint_prior_scale: 0.05
+    n_changepoints: 50
+    changepoint_range: 0.9
   '50085238776159':
     seasonality_mode: additive
     seasonality_prior_scale: 10.0
@@ -135,27 +137,27 @@ site_overrides:
     n_changepoints: 25
     changepoint_range: 0.8
   '30000651332664':
-    seasonality_mode: additive
+    seasonality_mode: multiplicative
     seasonality_prior_scale: 10.0
     holidays_prior_scale: 10.0
     daily_fourier_order: 10
-    weekly_fourier_order: 5
-    yearly_fourier_order: 10
-    growth: linear
-    changepoint_prior_scale: 0.005
+    weekly_fourier_order: 10
+    yearly_fourier_order: 15
+    growth: flat
+    changepoint_prior_scale: 0.01
     n_changepoints: 25
     changepoint_range: 0.8
   '30000651139165':
     seasonality_mode: multiplicative
     seasonality_prior_scale: 1.0
-    holidays_prior_scale: 5.0
-    daily_fourier_order: 10
+    holidays_prior_scale: 10
+    daily_fourier_order: 20
     weekly_fourier_order: 5
-    yearly_fourier_order: 10
+    yearly_fourier_order: 5
     growth: flat
-    changepoint_prior_scale: 0.001
-    n_changepoints: 10
-    changepoint_range: 0.95
+    changepoint_prior_scale: 0.5
+    n_changepoints: 25
+    changepoint_range: 0.9
   '30000250086126':
     seasonality_mode: multiplicative
     seasonality_prior_scale: 1.0
@@ -178,6 +180,28 @@ site_overrides:
     changepoint_prior_scale: 0.1
     n_changepoints: 30
     changepoint_range: 0.85
+  '30000650106751':
+    n_changepoints: 10
+    growth: flat
+    changepoint_range: 0.9
+    changepoint_prior_scale: 0.1
+    yearly_fourier_order: 20
+    weekly_fourier_order: 7
+    seasonality_prior_scale: 50
+    seasonality_mode: multiplicative
+    holidays_prior_scale: 10
+    daily_fourier_order: 20
+  '30000540191777':
+    n_changepoints: 10
+    growth: flat
+    changepoint_range: 0.8
+    changepoint_prior_scale: 0.001
+    daily_fourier_order: 18
+    holidays_prior_scale: 1
+    seasonality_mode: multiplicative
+    seasonality_prior_scale: 1
+    weekly_fourier_order: 3
+    yearly_fourier_order: 20
 grid_search:
   random_seed: 42
   n_iter_trend: 10
@@ -233,6 +257,7 @@ logistic_growth:
     '30001210305252': 734000.0
     '50003424619289': 1578177.500000001
     '50009082209764': 166249.99999999997
+    '30000650106751': 47079.99999999993
   floor: 16.333333333333336
   floor_by_site:
     '30000540191777': 16.333333333333336
@@ -248,3 +273,4 @@ logistic_growth:
     '30001210305252': 22083.33333333333
     '50003424619289': 0.0
     '50009082209764': 25015.0
+    '30000650106751': 3583.333333333333

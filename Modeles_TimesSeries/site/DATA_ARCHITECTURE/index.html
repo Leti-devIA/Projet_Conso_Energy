@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture des données - Projet Modèles Time Series</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; background: #fafafa; color: #1f2937; }
+      header { background: #ffffff; border-bottom: 1px solid #e5e7eb; padding: 12px 20px; }
+      main { max-width: 960px; margin: 24px auto; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 24px; }
+      h1, h2, h3 { color: #111827; }
+      a { color: #2563eb; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      code { background: #f3f4f6; padding: 2px 5px; border-radius: 4px; }
+      pre code { display: block; padding: 12px; overflow-x: auto; }
+      nav a { margin-right: 12px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>Projet Modèles Time Series</strong>
+      <nav style="margin-top: 8px;">
+        
+          
+            <a href="..">Accueil</a>
+          
+            <a href="../QUICK_START/">Quick start</a>
+          
+            <a href="./">Architecture des données</a>
+          
+            <a href="../WORKFLOW_MULTI_SITES/">Workflow multi-sites</a>
+          
+            <a href="../GUIDE_PREDICTIONS_LONGTERM/">Guide prédictions long terme</a>
+          
+            <a href="../DASHBOARD_GUIDE/">Guide dashboard</a>
+          
+            <a href="../MLFLOW_GUIDE/">Guide MLflow</a>
+          
+            <a href="../GUIDE_CICD/">Guide CI/CD</a>
+          
+            <a href="../TESTING/">Guide tests</a>
+          
+            <a href="../GRID_SEARCH_GUIDE/">Guide grid search</a>
+          
+            <a href="../FORMULE_COUT_HORAIRE/">Formule coût horaire</a>
+          
+            <a href="../AMELIORATIONS_PROPHET/">Améliorations Prophet</a>
+          
+        
+      </nav>
+    </header>
+
+    <main>
+      <h1 id="architecture-de-chargement-des-donnees">Architecture de Chargement des Données<a class="headerlink" href="#architecture-de-chargement-des-donnees" title="Permanent link">&para;</a></h1>
+<p>Ce document explique la nouvelle architecture mise en place pour gérer le chargement des données avec support CSV (actuel) et préparation pour base de données (futur).</p>
+<h2 id="structure-des-dossiers">📁 Structure des Dossiers<a class="headerlink" href="#structure-des-dossiers" title="Permanent link">&para;</a></h2>
+<pre><code>Modeles_TimesSeries/
+├── data/
+│   ├── raw/                    # Données brutes
+│   │   ├── sites/             # Données de consommation par site
+│   │   │   ├── dataclean_prm_30000250086126.csv
+│   │   │   ├── dataclean_prm_30000260159032.csv
+│   │   │   └── dataclean_prm_30000540185031.csv
+│   │   ├── meteo/             # Données météorologiques
+│   │   │   └── previsions_meteo.csv
+│   │   └── prix/              # Prix spot de l'électricité
+│   │       └── prix_spot.csv
+│   ├── processed/             # Données traitées
+│   └── predictions/           # Prédictions sauvegardées
+├── src/
+│   ├── data_loader.py         # 🆕 Module de chargement des données
+│   ├── preprocessing.py       # Preprocessing
+│   ├── feature_engineering.py # Feature engineering
+│   ├── train.py              # Entraînement
+│   └── ...
+└── config/
+    └── config.yaml           # Configuration
+</code></pre>
+<h2 id="architecture-du-dataloader">🏗️ Architecture du DataLoader<a class="headerlink" href="#architecture-du-dataloader" title="Permanent link">&para;</a></h2>
+<p>Le module <code>data_loader.py</code> fournit une architecture flexible avec :</p>
+<h3 id="1-classe-abstraite-dataloader">1. Classe Abstraite <code>DataLoader</code><a class="headerlink" href="#1-classe-abstraite-dataloader" title="Permanent link">&para;</a></h3>
+<p>Interface commune pour tous les loaders, définissant les méthodes :
+- <code>load_site_data()</code> : Charger les données de consommation
+- <code>load_meteo_data()</code> : Charger les données météo
+- <code>load_prix_data()</code> : Charger les prix spot
+- <code>list_available_sites()</code> : Lister les sites disponibles</p>
+<h3 id="2-csvdataloader-actuel">2. <code>CSVDataLoader</code> (Actuel)<a class="headerlink" href="#2-csvdataloader-actuel" title="Permanent link">&para;</a></h3>
+<p>Implémentation pour fichiers CSV :
+- Scanne automatiquement les fichiers dans <code>data/raw/sites/</code>
+- Détecte les PRMs depuis les noms de fichiers
+- Peut charger un site spécifique ou tous les sites
+- Filtre par dates si nécessaire</p>
+<h3 id="3-databasedataloader-futur">3. <code>DatabaseDataLoader</code> (Futur)<a class="headerlink" href="#3-databasedataloader-futur" title="Permanent link">&para;</a></h3>
+<p>Stub préparé pour la future connexion à une base de données :
+- Interface identique au CSVDataLoader
+- TODO: Implémenter les requêtes SQL
+- TODO: Gérer la connexion à la base de données</p>
+<h3 id="4-factory-function-get_data_loader">4. Factory Function <code>get_data_loader()</code><a class="headerlink" href="#4-factory-function-get_data_loader" title="Permanent link">&para;</a></h3>
+<p>Permet de sélectionner le bon loader :</p>
+<pre><code class="language-python">loader = get_data_loader('csv')  # ou 'database'
+</code></pre>
+<h2 id="utilisation">🚀 Utilisation<a class="headerlink" href="#utilisation" title="Permanent link">&para;</a></h2>
+<h3 id="lister-les-sites-disponibles">Lister les sites disponibles<a class="headerlink" href="#lister-les-sites-disponibles" title="Permanent link">&para;</a></h3>
+<pre><code class="language-bash">python main.py list-sites
+</code></pre>
+<h3 id="entrainer-sur-un-site-specifique">Entraîner sur un site spécifique<a class="headerlink" href="#entrainer-sur-un-site-specifique" title="Permanent link">&para;</a></h3>
+<pre><code class="language-bash">python main.py train --prm 30000250086126
+</code></pre>
+<h3 id="entrainer-sur-tous-les-sites">Entraîner sur tous les sites<a class="headerlink" href="#entrainer-sur-tous-les-sites" title="Permanent link">&para;</a></h3>
+<pre><code class="language-bash">python main.py train --all-sites
+</code></pre>
+<h3 id="utilisation-dans-le-code">Utilisation dans le code<a class="headerlink" href="#utilisation-dans-le-code" title="Permanent link">&para;</a></h3>
+<pre><code class="language-python">from data_loader import get_data_loader
+
+# Créer le loader
+loader = get_data_loader('csv')
+
+# Lister les sites
+sites = loader.list_available_sites()
+# Retourne: ['30000250086126', '30000260159032', '30000540185031']
+
+# Charger un site spécifique
+df = loader.load_site_data(prm='30000250086126')
+
+# Charger tous les sites
+df_all = loader.load_site_data()  # prm=None charge tous les sites
+
+# Charger avec filtre de dates
+df = loader.load_site_data(
+    prm='30000250086126',
+    start_date='2023-01-01',
+    end_date='2023-12-31'
+)
+
+# Charger données météo
+df_meteo = loader.load_meteo_data()
+
+# Charger prix spot
+df_prix = loader.load_prix_data()
+</code></pre>
+<h2 id="configuration">⚙️ Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>
+<p>Dans <code>config/config.yaml</code> :</p>
+<pre><code class="language-yaml"># Source des données ('csv' ou 'database')
+data_source: &quot;csv&quot;
+
+# Chemins des données
+data:
+  raw: &quot;data/raw&quot;
+  processed: &quot;data/processed&quot;
+  predictions: &quot;data/predictions&quot;
+
+# Configuration pour la base de données (FUTURE)
+# database:
+#   host: &quot;localhost&quot;
+#   port: 5432
+#   name: &quot;energy_db&quot;
+#   user: &quot;user&quot;
+#   password: &quot;password&quot;
+
+# Sites à traiter (vide = tous)
+sites:
+  prms: []  # ou [&quot;30000250086126&quot;, &quot;30000260159032&quot;]
+</code></pre>
+<h2 id="format-des-fichiers-csv">📊 Format des Fichiers CSV<a class="headerlink" href="#format-des-fichiers-csv" title="Permanent link">&para;</a></h2>
+<h3 id="fichiers-de-sites">Fichiers de sites<a class="headerlink" href="#fichiers-de-sites" title="Permanent link">&para;</a></h3>
+<p>Format : <code>dataclean_prm_XXXXXXXXXXXXX.csv</code></p>
+<p>Colonnes attendues :
+- <code>datetime</code> : Date et heure (ISO format)
+- <code>puissance_moy_heure</code> : Puissance moyenne horaire (Wh)
+- Autres colonnes : température, humidité, etc.</p>
+<h3 id="fichiers-meteo">Fichiers météo<a class="headerlink" href="#fichiers-meteo" title="Permanent link">&para;</a></h3>
+<p>Format : <code>previsions_meteo.csv</code> ou <code>meteo.csv</code></p>
+<p>Colonnes attendues :
+- <code>datetime</code> : Date et heure
+- <code>temperature</code> : Température (°C)
+- <code>humidite</code> : Humidité (%)
+- <code>vitesse_vent</code> : Vitesse du vent
+- <code>couverture_nuages</code> : Couverture nuageuse</p>
+<h2 id="migration-vers-base-de-donnees">🔄 Migration vers Base de Données<a class="headerlink" href="#migration-vers-base-de-donnees" title="Permanent link">&para;</a></h2>
+<p>Quand vous serez prêt à migrer vers une base de données :</p>
+<ol>
+<li>
+<p><strong>Implémenter DatabaseDataLoader</strong> dans <code>data_loader.py</code> :
+   <code>python
+   def load_site_data(self, prm=None, start_date=None, end_date=None):
+       # Connexion à la DB
+       # Requête SQL
+       # Retourner DataFrame</code></p>
+</li>
+<li>
+<p><strong>Configurer la connexion</strong> dans <code>config.yaml</code> :
+   <code>yaml
+   data_source: "database"
+   database:
+     host: "localhost"
+     port: 5432
+     name: "energy_db"</code></p>
+</li>
+<li>
+<p><strong>Aucun changement nécessaire</strong> dans le reste du code !
+   L'interface abstraite garantit la compatibilité.</p>
+</li>
+</ol>
+<h2 id="avantages-de-cette-architecture">🎯 Avantages de cette Architecture<a class="headerlink" href="#avantages-de-cette-architecture" title="Permanent link">&para;</a></h2>
+<p>✅ <strong>Flexibilité</strong> : Changement de source facile (CSV ↔ Database)
+✅ <strong>Multi-sites</strong> : Traite plusieurs sites automatiquement
+✅ <strong>Isolation</strong> : La logique de chargement est séparée du reste
+✅ <strong>Maintenance</strong> : Code plus propre et modulaire
+✅ <strong>Évolutivité</strong> : Prêt pour la migration DB
+✅ <strong>Testabilité</strong> : Chaque loader peut être testé indépendamment</p>
+<h2 id="exemples-complets">📝 Exemples Complets<a class="headerlink" href="#exemples-complets" title="Permanent link">&para;</a></h2>
+<h3 id="exemple-1-entrainer-tous-les-sites-automatiquement">Exemple 1 : Entraîner tous les sites automatiquement<a class="headerlink" href="#exemple-1-entrainer-tous-les-sites-automatiquement" title="Permanent link">&para;</a></h3>
+<pre><code class="language-bash"># Copier vos fichiers CSV dans data/raw/sites/
+cp ../data/dataclean/dataclean_prm_*.csv data/raw/sites/
+
+# Lister les sites détectés
+python main.py list-sites
+
+# Entraîner tous les sites
+python main.py train --all-sites
+</code></pre>
+<p>Chaque site aura son propre modèle sauvegardé avec le PRM dans le nom.</p>
+<h3 id="exemple-2-workflow-complet-pour-un-site">Exemple 2 : Workflow complet pour un site<a class="headerlink" href="#exemple-2-workflow-complet-pour-un-site" title="Permanent link">&para;</a></h3>
+<pre><code class="language-bash"># 1. Lister les sites
+python main.py list-sites
+
+# 2. Entraîner un site spécifique
+python main.py train --prm 30000250086126
+
+# 3. Le modèle est sauvegardé avec le PRM :
+# - models/saved/lstm_energy_forecast_20260212_143000_30000250086126.h5
+# - models/saved/scalers_20260212_143000_30000250086126.pkl
+# - models/saved/config_20260212_143000_30000250086126.json
+</code></pre>
+<h3 id="exemple-3-utiliser-le-dataloader-dans-un-script-custom">Exemple 3 : Utiliser le DataLoader dans un script custom<a class="headerlink" href="#exemple-3-utiliser-le-dataloader-dans-un-script-custom" title="Permanent link">&para;</a></h3>
+<pre><code class="language-python">from data_loader import get_data_loader
+import pandas as pd
+
+# Créer le loader
+loader = get_data_loader('csv', config_path='config/config.yaml')
+
+# Charger plusieurs sites pour analyse
+sites = ['30000250086126', '30000260159032']
+for prm in sites:
+    df = loader.load_site_data(prm=prm)
+    print(f&quot;Site {prm}: {len(df)} lignes, consommation moyenne: {df['puissance_moy_heure'].mean():.2f} Wh&quot;)
+
+# Combiner avec données météo
+df_meteo = loader.load_meteo_data()
+df_site = loader.load_site_data(prm='30000250086126')
+df_merged = pd.merge(df_site, df_meteo, on='datetime', how='inner')
+</code></pre>
+<h2 id="troubleshooting">🐛 Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
+<h3 id="erreur-aucun-fichier-de-site-trouve">Erreur : "Aucun fichier de site trouvé"<a class="headerlink" href="#erreur-aucun-fichier-de-site-trouve" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Vérifiez que les fichiers sont dans <code>data/raw/sites/</code></li>
+<li>Format attendu : <code>dataclean_prm_XXXXX.csv</code></li>
+</ul>
+<h3 id="erreur-features-manquantes">Erreur : "Features manquantes"<a class="headerlink" href="#erreur-features-manquantes" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Assurez-vous que les colonnes requises sont présentes</li>
+<li>Vérifiez que la colonne <code>datetime</code> existe</li>
+<li>La colonne <code>puissance_moy_heure</code> doit être présente</li>
+</ul>
+<h3 id="les-sites-ne-sont-pas-detectes">Les sites ne sont pas détectés<a class="headerlink" href="#les-sites-ne-sont-pas-detectes" title="Permanent link">&para;</a></h3>
+<pre><code class="language-bash"># Vérifier manuellement
+ls data/raw/sites/
+
+# Lister avec Python
+python -c &quot;from src.data_loader import get_data_loader; print(get_data_loader('csv').list_available_sites())&quot;
+</code></pre>
+    </main>
+  </body>
+</html>

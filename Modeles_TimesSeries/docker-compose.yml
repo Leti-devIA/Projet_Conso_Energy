@@ -63,6 +63,8 @@ services:
       - ./models/saved:/app/models/saved
       # MLflow runs (pour les métriques)
       - ./api/api-inference/mlruns:/app/mlruns
+      # Prédictions persistées sur l'hôte
+      - ./data/predictions:/app/data/predictions
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 15s

@@ -59,6 +59,55 @@ class ModelsListResponse(BaseModel):
     models: List[dict]
 
 
+class LatestModelInfo(BaseModel):
+    """
+    Informations sur le dernier modèle entraîné pour un PRM.
+    Utilisé par Fabric pour mettre à jour la table ia_models.
+    """
+    prm: str
+    model_name: str
+    model_version: str
+    artifact_uri: str
+    mae: float | None = None
+    rmse: float | None = None
+    mape: float | None = None
+    trained_at: datetime
+    is_active: bool = True
+
+
+class LatestModelsResponse(BaseModel):
+    """
+    Réponse pour la liste de tous les derniers modèles.
+    """
+    total: int
+    models: List[LatestModelInfo]
+
+
+class IaModelsSyncItem(BaseModel):
+    """
+    Ligne prête pour alimenter la table Fabric ia_models.
+    """
+    id_modele: str
+    prm: str
+    nom_modele: str
+    version_modele: str
+    uri: str
+    date_creation: datetime
+    is_active: bool
+    mae: float | None = None
+    rmse: float | None = None
+    mape: float | None = None
+
+
+class IaModelsSyncResponse(BaseModel):
+    """
+    Réponse de synchronisation vers Fabric.
+    """
+    total: int
+    generated_at: datetime
+    rows: List[IaModelsSyncItem]
+
+
 # ============================================================
 # UTILITAIRE : récupération des métriques MLflow
 # ============================================================
@@ -138,6 +187,137 @@ def append_fabric_outbox_record(payload: dict) -> None:
 
 # ============================================================
 # ROUTE 1 : Lister les modèles disponibles
+
+# ============================================================
+# ROUTE 0 : Dernier modèle entraîné → pour Fabric ia_models
+# ============================================================
+
+@router.get(
+    "/latest",
+    response_model=LatestModelsResponse,
+    summary="Récupérer tous les derniers modèles entraînés",
+)
+async def get_latest_models() -> LatestModelsResponse:
+    """
+    Retourne les informations de tous les modèles _latest.pkl.
+
+    Cette route est appelée par Fabric pour mettre à jour
+    la table ia_models avec les derniers modèles entraînés.
+
+    Pour chaque modèle trouvé, on enrichit avec les métriques MLflow.
+    """
+    logger.info("[INFO] Recherche de tous les derniers modèles entraînés...")
+
+    if not MODELS_DIR.exists():
+        logger.warning(f"[WARNING] Dossier modèles introuvable : {MODELS_DIR}")
+        return LatestModelsResponse(total=0, models=[])
+
+    results = []
+
+    # Parcourt tous les fichiers prophet_model_{prm}_latest.pkl
+    for pkl_file in MODELS_DIR.glob("*_latest.pkl"):
+
+        # Extrait le PRM depuis le nom du fichier
+        filename = pkl_file.stem  # ex: prophet_model_30000650060080_latest
+        prm = None
+
+        for token in filename.replace("prophet_model_", "").split("_"):
+            if token.isdigit() and len(token) == 14:
+                prm = token
+                break
+
+        # Si aucun PRM valide trouvé, on passe au fichier suivant
+        if not prm:
+            logger.warning(f"[WARNING] PRM non trouvé dans : {pkl_file.name}")
+            continue
+
+        # Récupère les métriques MLflow associées à ce PRM
+        mlflow_data = get_mlflow_metrics(prm)
+        metrics = mlflow_data.get("metrics", {})
+        trained_at = mlflow_data.get("created_at", datetime.utcfromtimestamp(pkl_file.stat().st_mtime))
+
+        results.append(LatestModelInfo(
+            prm=prm,
+            model_name=mlflow_data.get("params", {}).get("model_name", "prophet"),
+            model_version=trained_at.strftime("%Y.%m.%d.1"),
+            artifact_uri=str(pkl_file),
+            # Métriques de performance du modèle
+            mae=metrics.get("mae"),
+            rmse=metrics.get("rmse"),
+            mape=metrics.get("mape"),
+            trained_at=trained_at,
+            is_active=True,
+        ))
+
+        logger.info(f"[INFO] Modèle ajouté : PRM={prm}")
+
+    logger.info(f"[INFO] {len(results)} modèle(s) latest trouvé(s)")
+
+    return LatestModelsResponse(total=len(results), models=results)
+
+
+@router.get(
+    "/latest/ia-models",
+    response_model=IaModelsSyncResponse,
+    summary="Payload prêt Fabric pour ia_models",
+)
+async def get_latest_models_for_fabric() -> IaModelsSyncResponse:
+    """
+    Retourne les derniers modèles au format cible de la table ia_models.
+
+    Cette route est prévue pour être appelée directement par Fabric,
+    sans faire un appel /list puis /prm/{prm} pour chaque modèle.
+    """
+    logger.info("[INFO] Préparation du payload ia_models pour Fabric...")
+
+    if not MODELS_DIR.exists():
+        logger.warning(f"[WARNING] Dossier modèles introuvable : {MODELS_DIR}")
+        return IaModelsSyncResponse(total=0, generated_at=datetime.utcnow(), rows=[])
+
+    rows: List[IaModelsSyncItem] = []
+
+    for pkl_file in MODELS_DIR.glob("*_latest.pkl"):
+        filename = pkl_file.stem
+        prm = None
+
+        # Extrait un PRM sur 14 chiffres depuis le nom du fichier
+        for token in filename.replace("prophet_model_", "").split("_"):
+            if token.isdigit() and len(token) == 14:
+                prm = token
+                break
+
+        if not prm:
+            logger.warning(f"[WARNING] PRM non détecté pour : {pkl_file.name}")
+            continue
+
+        mlflow_data = get_mlflow_metrics(prm)
+        metrics = mlflow_data.get("metrics", {})
+        created_at = mlflow_data.get("created_at", datetime.utcfromtimestamp(pkl_file.stat().st_mtime))
+
+        rows.append(
+            IaModelsSyncItem(
+                id_modele=mlflow_data.get("run_id", str(uuid.uuid4())),
+                prm=prm,
+                nom_modele=mlflow_data.get("params", {}).get("model_name", "prophet"),
+                version_modele=created_at.strftime("%Y.%m.%d.1"),
+                uri=str(pkl_file),
+                date_creation=created_at,
+                is_active=True,
+                mae=metrics.get("mae"),
+                rmse=metrics.get("rmse"),
+                mape=metrics.get("mape"),
+            )
+        )
+
+    # Trie par date de création décroissante pour simplifier le contrôle côté Fabric
+    rows.sort(key=lambda item: item.date_creation, reverse=True)
+
+    logger.info(f"[INFO] Payload Fabric prêt : {len(rows)} ligne(s)")
+    return IaModelsSyncResponse(
+        total=len(rows),
+        generated_at=datetime.utcnow(),
+        rows=rows,
+    )
 # ============================================================
 
 @router.get(

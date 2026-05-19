@@ -27,7 +27,7 @@ if str(PROJECT_ROOT) not in sys.path:
 # ✅ Imports package (et non module plat)
 from src.train import train_one_site  # + autres fonctions si besoin
 # ex: from src.train import train_one_site, train_all_sites
-from src.predict import predict_future, load_prophet_model
+from src.predict import predict_future, load_prophet_model, predict_all_sites
 from src.utils import load_config, detect_prms
 from src.generate_climate_averages import generate_climate_averages_pipeline
 import pandas as pd
@@ -128,40 +128,68 @@ def main_train(args):
 
 def main_predict(args):
     """
-    Pipeline de prédiction Prophet à partir d'un fichier météo futur.
+    Pipeline de prédiction Prophet.
 
-    Remarque pédagogique :
-    - la qualité de la prédiction dépend directement de la qualité du fichier météo fourni.
+    Usage :
+        python main.py predict --prm 30000250086126
+        python main.py predict --all-sites
+        python main.py predict --prm 30000250086126 --meteo fichier.csv
     """
     print("\n" + "🔮" * 30)
     print("PIPELINE DE PRÉDICTION PROPHET")
     print("🔮" * 30 + "\n")
 
-    prm = str(args.prm)
-
-    # Charger la configuration
     config = load_config(args.config)
 
-    # Vérifier que le modèle existe
+    # ── Si --all-sites : déléguer à predict_all_sites()
+    if args.all_sites:
+        print(f"📊 Prédiction pour TOUS les sites\\n")
+        predict_all_sites(
+            model_dir=args.model_dir,
+            config_path=args.config,
+            years=getattr(args, 'years', 1),
+            add_variability=getattr(args, 'add_variability', False)
+        )
+        return
+
+    # ── Sinon, prédiction pour 1 site
+    prm = str(args.prm)
     model_dir = Path(args.model_dir)
     model_path = model_dir / f"prophet_model_{prm}_latest.pkl"
 
     if not model_path.exists():
-        print(f"❌ Erreur : Modèle introuvable : {model_path}")
-        print(f"\nAssurez-vous d'avoir entraîné le modèle pour le PRM {prm} :")
-        print(f"   python main.py train --prm {prm}")
+        print(f"❌ Modèle introuvable : {model_path}")
+        print(f"   Entraînez d'abord : python main.py train --prm {prm}")
         sys.exit(1)
 
-    # Charger les données météo futures
-    print("📂 Chargement des données météo futures...")
-    try:
-        meteo_future = pd.read_csv(args.meteo)
-        print(f"✅ Météo future : {len(meteo_future)} lignes")
-    except FileNotFoundError:
-        print(f"❌ Erreur : Fichier météo non trouvé : {args.meteo}")
-        sys.exit(1)
+    # Météo : fichier fourni ou génération automatique
+    meteo_file = getattr(args, 'meteo', None)
+    if meteo_file:
+        print("📂 Chargement du fichier météo...")
+        try:
+            meteo_future = pd.read_csv(meteo_file)
+            print(f"   ✅ {len(meteo_future)} lignes chargées")
+        except FileNotFoundError:
+            print(f"❌ Fichier météo non trouvé : {meteo_file}")
+            sys.exit(1)
+    else:
+        raw_data_dir = Path(config["data"]["raw"]) / "sites"
+        historique_path = raw_data_dir / f"dataclean_prm_{prm}.csv"
+        if not historique_path.exists():
+            print(f"❌ Historique introuvable : {historique_path}")
+            sys.exit(1)
+        print("🌦️  Génération météo (moyennes climatiques)...")
+        meteo_future = generate_climate_averages_pipeline(
+            historique_path=str(historique_path),
+            output_path=None,
+            start_date=None,
+            nb_annees=getattr(args, 'years', 1),
+            add_variability=getattr(args, 'add_variability', False),
+            config_path=args.config
+        )
+        print(f"   ✅ {len(meteo_future)} heures générées")
 
-    # Prédire
+    # Prédiction
     print("\n🔮 Génération des prédictions...")
     try:
         df_predictions = predict_future(
@@ -171,22 +199,18 @@ def main_predict(args):
             config_path=args.config
         )
 
-        # Définir le chemin de sortie
-        if args.output:
-            output_path = Path(args.output)
-        else:
-            pred_dir = Path(config["data"]["predictions"])
-            pred_dir.mkdir(parents=True, exist_ok=True)
-            output_path = pred_dir / f"predictions_{prm}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        # Sauvegarde
+        pred_dir = Path(config["data"]["predictions"])
+        pred_dir.mkdir(parents=True, exist_ok=True)
+        output = getattr(args, 'output', None)
+        output_path = Path(output) if output else pred_dir / f"predictions_{prm}.csv"
 
-        # Sauvegarder
         df_predictions.to_csv(output_path, index=False)
         print(f"✅ Prédictions sauvegardées : {output_path}")
 
         print("\n" + "✅" * 30)
         print("PRÉDICTION TERMINÉE AVEC SUCCÈS")
         print("✅" * 30)
-        print(f"\n📁 Fichier de sortie : {output_path}")
 
     except Exception as e:
         print(f"❌ Erreur lors de la prédiction : {e}")
@@ -329,18 +353,25 @@ def main():
     train_parser.add_argument('--config', type=str, default='config/config.yaml',
                             help='Chemin vers le fichier de configuration')
 
-    # Commande PREDICT (court terme avec météo réelle)
-    predict_parser = subparsers.add_parser('predict', help='Prédiction court et long terme avec Prophet')
-    predict_parser.add_argument('--prm', type=str, required=True,
-                              help='Code PRM du site (ex: 30000540191777)')
-    predict_parser.add_argument('--meteo', type=str, required=True,
-                              help='Chemin vers les prévisions météo (fichier CSV)')
+    # Commande PREDICT (un site ou tous les sites)
+    predict_parser = subparsers.add_parser('predict', help='Prédiction avec Prophet (un site ou tous)')
+    predict_group = predict_parser.add_mutually_exclusive_group(required=True)
+    predict_group.add_argument('--prm', type=str,
+                               help='Code PRM du site (ex: 30000540191777)')
+    predict_group.add_argument('--all-sites', action='store_true',
+                               help='Prédire sur tous les sites disponibles')
+    predict_parser.add_argument('--meteo', type=str, default=None,
+                               help='Fichier météo CSV (optionnel ; si absent, moyennes climatiques)')
+    predict_parser.add_argument('--years', type=int, default=3,
+                               help='Horizon en années pour la météo générée (défaut : 3)')
+    predict_parser.add_argument('--add-variability', action='store_true',
+                               help='Ajoute une variabilité à la météo générée')
     predict_parser.add_argument('--output', type=str, default=None,
-                              help='Chemin du fichier de sortie')
+                               help='Chemin du fichier de sortie (mode --prm uniquement)')
     predict_parser.add_argument('--model-dir', type=str, default='models/saved',
-                              help='Répertoire des modèles sauvegardés')
+                               help='Répertoire des modèles sauvegardés')
     predict_parser.add_argument('--config', type=str, default='config/config.yaml',
-                              help='Chemin vers le fichier de configuration')
+                               help='Chemin vers le fichier de configuration')
 
     args = parser.parse_args()
 

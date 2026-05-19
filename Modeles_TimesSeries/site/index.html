@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Accueil - Projet Modèles Time Series</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; background: #fafafa; color: #1f2937; }
+      header { background: #ffffff; border-bottom: 1px solid #e5e7eb; padding: 12px 20px; }
+      main { max-width: 960px; margin: 24px auto; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 24px; }
+      h1, h2, h3 { color: #111827; }
+      a { color: #2563eb; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      code { background: #f3f4f6; padding: 2px 5px; border-radius: 4px; }
+      pre code { display: block; padding: 12px; overflow-x: auto; }
+      nav a { margin-right: 12px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>Projet Modèles Time Series</strong>
+      <nav style="margin-top: 8px;">
+        
+          
+            <a href=".">Accueil</a>
+          
+            <a href="QUICK_START/">Quick start</a>
+          
+            <a href="DATA_ARCHITECTURE/">Architecture des données</a>
+          
+            <a href="WORKFLOW_MULTI_SITES/">Workflow multi-sites</a>
+          
+            <a href="GUIDE_PREDICTIONS_LONGTERM/">Guide prédictions long terme</a>
+          
+            <a href="DASHBOARD_GUIDE/">Guide dashboard</a>
+          
+            <a href="MLFLOW_GUIDE/">Guide MLflow</a>
+          
+            <a href="GUIDE_CICD/">Guide CI/CD</a>
+          
+            <a href="TESTING/">Guide tests</a>
+          
+            <a href="GRID_SEARCH_GUIDE/">Guide grid search</a>
+          
+            <a href="FORMULE_COUT_HORAIRE/">Formule coût horaire</a>
+          
+            <a href="AMELIORATIONS_PROPHET/">Améliorations Prophet</a>
+          
+        
+      </nav>
+    </header>
+
+    <main>
+      <h1 id="documentation-du-projet">Documentation du projet<a class="headerlink" href="#documentation-du-projet" title="Permanent link">&para;</a></h1>
+<p>Cette documentation centralise le fonctionnement du projet <strong>Modeles_TimesSeries</strong> : architecture, entraînement, tests, CI/CD et exploitation.</p>
+<h2 id="parcours-recommande">Parcours recommandé<a class="headerlink" href="#parcours-recommande" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Lire <a href="DATA_ARCHITECTURE/">DATA_ARCHITECTURE</a> pour comprendre les flux de données.</li>
+<li>Lire <a href="WORKFLOW_MULTI_SITES/">WORKFLOW_MULTI_SITES</a> pour l’enchaînement métier.</li>
+<li>Lire <a href="MLFLOW_GUIDE/">MLFLOW_GUIDE</a> pour le suivi d’expériences.</li>
+<li>Lire <a href="TESTING/">TESTING</a> et <a href="GUIDE_CICD/">GUIDE_CICD</a> pour la qualité logicielle.</li>
+</ol>
+<h2 id="convention-de-redaction">Convention de rédaction<a class="headerlink" href="#convention-de-redaction" title="Permanent link">&para;</a></h2>
+<ul>
+<li>1 fichier = 1 sujet fonctionnel clair.</li>
+<li>Utiliser des titres explicites (<code>#</code>, <code>##</code>, <code>###</code>) avec une hiérarchie régulière.</li>
+<li>Commencer chaque document par : objectif, prérequis, étapes, vérification.</li>
+<li>Ajouter des exemples de commandes testables quand c’est possible.</li>
+<li>Préférer les noms de fichiers en MAJUSCULES avec underscore, comme déjà présent dans ce dossier.</li>
+</ul>
+<h2 id="commandes-locales">Commandes locales<a class="headerlink" href="#commandes-locales" title="Permanent link">&para;</a></h2>
+<p>Depuis la racine <code>Modeles_TimesSeries</code> :</p>
+<pre><code class="language-bash">mkdocs serve
+</code></pre>
+<p>Puis ouvrir :</p>
+<pre><code class="language-text">http://127.0.0.1:8000
+</code></pre>
+<p>Build statique :</p>
+<pre><code class="language-bash">mkdocs build
+</code></pre>
+<p>Le site généré est disponible dans le dossier <code>site/</code>.</p>
+    </main>
+  </body>
+</html>

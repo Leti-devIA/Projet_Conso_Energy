@@ -392,7 +392,7 @@ def tune_trend(df_train, df_val, regressors, gs_cfg, metrics, prm, rng):
     """Recherche des meilleurs paramètres de trend avec Mango."""
     print("\n================ PHASE 1 : TREND =================")
     trend_space = {
-        "growth": _ensure_space_list(gs_cfg.get("growth"), ["flat", "linear"]),
+        "growth": _ensure_space_list(gs_cfg.get("growth"), ["flat"]),
         "changepoint_prior_scale": _ensure_space_list(
             gs_cfg.get("changepoint_prior_scale"),
             [0.001, 0.01, 0.05, 0.1, 0.3],
@@ -427,12 +427,12 @@ def tune_seasonality(df_train, df_val, regressors, gs_cfg, metrics, base_params,
     """Recherche des meilleurs paramètres de saisonnalité avec Mango."""
     print("\n================ PHASE 2 : SAISONNALITÉS =================")
     season_space = {
-        "seasonality_mode": _ensure_space_list(gs_cfg.get("seasonality_mode"), ["multiplicative"]),
-        "seasonality_prior_scale": _ensure_space_list(gs_cfg.get("seasonality_prior_scale"), [1, 10, 30]),
-        "holidays_prior_scale": _ensure_space_list(gs_cfg.get("holidays_prior_scale"), [5, 10, 20]),
-        "daily_fourier_order": _ensure_space_list(gs_cfg.get("daily_fourier_order"), [5, 15, 20]),
-        "weekly_fourier_order": _ensure_space_list(gs_cfg.get("weekly_fourier_order"), [5, 15, 20]),
-        "yearly_fourier_order": _ensure_space_list(gs_cfg.get("yearly_fourier_order"), [5, 15, 20]),
+        "seasonality_mode": _ensure_space_list(gs_cfg.get("seasonality_mode"), ["multiplicative","additive"]),
+        "seasonality_prior_scale": _ensure_space_list(gs_cfg.get("seasonality_prior_scale"), [1, 5, 10, 20]),
+        "holidays_prior_scale": _ensure_space_list(gs_cfg.get("holidays_prior_scale"), [0.1, 1, 5, 10]),
+        "daily_fourier_order": _ensure_space_list(gs_cfg.get("daily_fourier_order"), [3, 5, 10, 18]),
+        "weekly_fourier_order": _ensure_space_list(gs_cfg.get("weekly_fourier_order"), [3, 5, 10, 18]),
+        "yearly_fourier_order": _ensure_space_list(gs_cfg.get("yearly_fourier_order"), [5, 10, 15, 20]),
     }
     n_iterations = int(gs_cfg.get("n_samples_season", gs_cfg.get("n_iter_season", 25)))
     fixed_params = build_tuning_fixed_params(gs_cfg)

@@ -1,0 +1,39 @@
+site_name: Projet Modèles Time Series
+site_description: Documentation technique du projet de prévision énergétique multi-sites
+site_url: http://localhost:8000
+
+repo_name: Modeles_TimesSeries
+
+theme:
+  name: null
+  custom_dir: docs/theme
+
+docs_dir: docs
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Accueil: index.md
+  - Démarrage rapide: QUICK_START.md
+  - APIs:
+      - API Dataclean: API Dataclean.md
+      - API Inference: API Inference.md
+  - Infrastructure:
+      - Docker & Ngrok: DOCKER_NGROK.md
+      - Setup Ngrok: SETUP_NGROK.md
+      - CI/CD: GUIDE_CICD.md
+  - Machine Learning:
+      - Pipeline d'entraînement: PIPELINE_ENTRAINEMENT.md
+      - Modèle Prophet: AMELIORATIONS_PROPHET.md
+      - Grid Search: GRID_SEARCH_GUIDE.md
+      - MLflow: MLFLOW_GUIDE.md
+  - Application:
+      - Dashboard: DASHBOARD_GUIDE.md
+      - Formule coût horaire: FORMULE_COUT_HORAIRE.md
+  - Architecture des données: DATA_ARCHITECTURE.md
+  - Tests: TESTING.md
+  - MkDocs: MKDOCS_GUIDE.md

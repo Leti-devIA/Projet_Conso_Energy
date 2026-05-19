@@ -103,3 +103,32 @@ async def get_database_connection():
 
 async def close_database_connection():
     await db_manager.close()
+
+
+def create_new_connection():
+    """
+    Crée une connexion FRESH à chaque appel.
+
+    Pourquoi :
+    - La connexion singleton cause des conflits quand plusieurs requêtes arrivent
+      en même temps (pyodbc : 'Connection is busy').
+    - Ici, chaque requête SQL a sa propre connexion → plus de conflits.
+    """
+    server = os.getenv("DB_SERVER")
+    database = os.getenv("DB_DATABASE")
+    username = os.getenv("DB_USER")
+    password = os.getenv("DB_PASSWORD")
+
+    if not all([server, database, username, password]):
+        raise RuntimeError("Variables DB_SERVER / DB_DATABASE / DB_USER / DB_PASSWORD manquantes")
+
+    connection_string = (
+        f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+        f"SERVER={server};DATABASE={database};"
+        f"Authentication=ActiveDirectoryPassword;"
+        f"UID={username};PWD={password};"
+        f"Encrypt=yes;TrustServerCertificate=yes;"
+        f"Connection Timeout=60;"
+    )
+
+    return pyodbc.connect(connection_string)

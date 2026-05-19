@@ -35,7 +35,7 @@ Modeles_TimesSeries/
 ├── src/                    # Prétraitement, features, entraînement, prédiction
 ├── data/                   # raw / processed / predictions
 ├── models/saved/           # Modèles Prophet sérialisés (.pkl)
-├── docs_annexes/           # Documentation technique détaillée
+├── docs/                   # Documentation technique détaillée (MkDocs)
 ├── tests/                  # Tests unitaires + intégration
 ├── dashboard_app.py        # Dashboard Streamlit
 ├── main.py                 # CLI pédagogique (list, train, predict)
@@ -181,6 +181,16 @@ python main.py train --prm 30000250086126
 python main.py train --all-sites
 ```
 
+### Prédire pour un site
+```bash
+python main.py predict --prm 30000250086126
+```
+
+### Prédire pour tous les sites
+```bash
+python main.py predict --all-sites
+```
+
 ### Prédire à partir d'un fichier météo futur
 ```bash
 python main.py predict --prm 30000250086126 --meteo data/raw/meteo/fichier.csv
@@ -254,7 +264,7 @@ docker compose --profile local up --build
 
 ## 13) Documentation complémentaire
 
-Consulter `docs_annexes/` :
+Consulter `docs/` :
 
 - `DATA_ARCHITECTURE.md`
 - `MLFLOW_GUIDE.md`
@@ -264,7 +274,31 @@ Consulter `docs_annexes/` :
 
 ---
 
-## 14) Bonnes pratiques pour étudiants
+## 14) Documentation MkDocs
+
+Depuis la racine du projet :
+
+```bash
+mkdocs serve
+```
+
+Puis ouvrir :
+
+```text
+http://127.0.0.1:8000
+```
+
+Générer le site statique :
+
+```bash
+mkdocs build
+```
+
+Le résultat est généré dans le dossier `site/`.
+
+---
+
+## 15) Bonnes pratiques pour étudiants
 
 - Commencer par un seul PRM pour valider le pipeline de bout en bout.
 - Versionner vos expériences (métriques, paramètres, modèle).
@@ -273,7 +307,7 @@ Consulter `docs_annexes/` :
 
 ---
 
-## 15) Contribution
+## 16) Contribution
 
 Les contributions sont bienvenues :
 

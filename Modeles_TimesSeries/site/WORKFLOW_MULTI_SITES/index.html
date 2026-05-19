@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Workflow multi-sites - Projet Modèles Time Series</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; background: #fafafa; color: #1f2937; }
+      header { background: #ffffff; border-bottom: 1px solid #e5e7eb; padding: 12px 20px; }
+      main { max-width: 960px; margin: 24px auto; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 24px; }
+      h1, h2, h3 { color: #111827; }
+      a { color: #2563eb; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      code { background: #f3f4f6; padding: 2px 5px; border-radius: 4px; }
+      pre code { display: block; padding: 12px; overflow-x: auto; }
+      nav a { margin-right: 12px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>Projet Modèles Time Series</strong>
+      <nav style="margin-top: 8px;">
+        
+          
+            <a href="..">Accueil</a>
+          
+            <a href="../QUICK_START/">Quick start</a>
+          
+            <a href="../DATA_ARCHITECTURE/">Architecture des données</a>
+          
+            <a href="./">Workflow multi-sites</a>
+          
+            <a href="../GUIDE_PREDICTIONS_LONGTERM/">Guide prédictions long terme</a>
+          
+            <a href="../DASHBOARD_GUIDE/">Guide dashboard</a>
+          
+            <a href="../MLFLOW_GUIDE/">Guide MLflow</a>
+          
+            <a href="../GUIDE_CICD/">Guide CI/CD</a>
+          
+            <a href="../TESTING/">Guide tests</a>
+          
+            <a href="../GRID_SEARCH_GUIDE/">Guide grid search</a>
+          
+            <a href="../FORMULE_COUT_HORAIRE/">Formule coût horaire</a>
+          
+            <a href="../AMELIORATIONS_PROPHET/">Améliorations Prophet</a>
+          
+        
+      </nav>
+    </header>
+
+    <main>
+      <h1 id="workflow-multi-sites-predictions-dashboard">🎯 Workflow Multi-Sites : Prédictions → Dashboard<a class="headerlink" href="#workflow-multi-sites-predictions-dashboard" title="Permanent link">&para;</a></h1>
+<h2 id="ce-qui-a-ete-modifie">✅ Ce qui a été modifié<a class="headerlink" href="#ce-qui-a-ete-modifie" title="Permanent link">&para;</a></h2>
+<h3 id="1-commande-predict-longterm-simplifiee">1. Commande <code>predict-longterm</code> simplifiée<a class="headerlink" href="#1-commande-predict-longterm-simplifiee" title="Permanent link">&para;</a></h3>
+<p><strong>Avant</strong> :</p>
+<pre><code class="language-bash">python main.py predict-longterm --historique data/processed/data_preprocessed_30000540191777.csv --years 3
+</code></pre>
+<p><strong>Maintenant</strong> :</p>
+<pre><code class="language-bash">python main.py predict-longterm --prm 30000540191777 --years 3
+</code></pre>
+<p>Le script construit <strong>automatiquement</strong> les chemins vers :
+- Historique : <code>data/processed/data_preprocessed_{prm}.csv</code>
+- Modèle : <code>models/saved/lstm_energy_forecast_latest_lstm_energy_forecast_{prm}.h5</code>
+- Sortie : <code>data/predictions/predictions_longterm_3ans_{prm}.csv</code></p>
+<h3 id="2-nouveau-script-generate_all_predictionspy">2. Nouveau script <code>generate_all_predictions.py</code><a class="headerlink" href="#2-nouveau-script-generate_all_predictionspy" title="Permanent link">&para;</a></h3>
+<p>Génère les prédictions pour <strong>tous les sites</strong> en une seule commande :</p>
+<pre><code class="language-bash">python generate_all_predictions.py
+</code></pre>
+<h3 id="3-dashboard-multi-sites">3. Dashboard multi-sites<a class="headerlink" href="#3-dashboard-multi-sites" title="Permanent link">&para;</a></h3>
+<p>Le dashboard détecte automatiquement tous les fichiers de prédictions et affiche un menu déroulant pour sélectionner le site.</p>
+<hr />
+<h2 id="workflow-complet">🚀 Workflow Complet<a class="headerlink" href="#workflow-complet" title="Permanent link">&para;</a></h2>
+<h3 id="etape-1-lister-vos-sites">Étape 1 : Lister vos sites<a class="headerlink" href="#etape-1-lister-vos-sites" title="Permanent link">&para;</a></h3>
+<pre><code class="language-bash">python main.py list-sites
+</code></pre>
+<h3 id="etape-2-generer-les-predictions">Étape 2 : Générer les prédictions<a class="headerlink" href="#etape-2-generer-les-predictions" title="Permanent link">&para;</a></h3>
+<p><strong>Option A : Site par site</strong></p>
+<pre><code class="language-bash">python main.py predict-longterm --prm 30000540191777 --years 3 --add-trend
+python main.py predict-longterm --prm 30000650805048 --years 3 --add-trend
+python main.py predict-longterm --prm 30000651139165 --years 3 --add-trend
+...
+</code></pre>
+<p><strong>Option B : Tous les sites en une fois (Recommandé)</strong></p>
+<pre><code class="language-bash">python generate_all_predictions.py
+</code></pre>
+<h3 id="etape-3-visualiser-dans-le-dashboard">Étape 3 : Visualiser dans le dashboard<a class="headerlink" href="#etape-3-visualiser-dans-le-dashboard" title="Permanent link">&para;</a></h3>
+<pre><code class="language-bash">streamlit run dashboard_longterm.py
+</code></pre>
+<p>Le dashboard :
+1. Détecte automatiquement tous les fichiers <code>predictions_longterm_*_{prm}.csv</code>
+2. Affiche un menu déroulant pour sélectionner le site
+3. Charge les données du site sélectionné
+4. Affiche les graphiques et statistiques</p>
+<hr />
+<h2 id="structure-des-fichiers-generes">📂 Structure des fichiers générés<a class="headerlink" href="#structure-des-fichiers-generes" title="Permanent link">&para;</a></h2>
+<pre><code>data/
+  predictions/
+    predictions_longterm_3ans_30000540191777.csv      # Prédictions site 1
+    predictions_longterm_3ans_30000540191777_stats.txt
+    predictions_longterm_3ans_30000650805048.csv      # Prédictions site 2
+    predictions_longterm_3ans_30000650805048_stats.txt
+    predictions_longterm_3ans_30000651139165.csv      # Prédictions site 3
+    predictions_longterm_3ans_30000651139165_stats.txt
+    ...
+</code></pre>
+<p>Chaque fichier contient le <strong>PRM</strong> dans son nom pour faciliter l'identification.</p>
+<hr />
+<h2 id="verifications-automatiques">🔍 Vérifications automatiques<a class="headerlink" href="#verifications-automatiques" title="Permanent link">&para;</a></h2>
+<p>Quand vous lancez <code>predict-longterm --prm XXXXX</code>, le script vérifie :</p>
+<p>✅ <strong>Historique existe</strong> : <code>data/processed/data_preprocessed_{prm}.csv</code>
+- Si absent → message d'erreur avec suggestion : <code>python main.py train --prm {prm}</code></p>
+<p>✅ <strong>Modèle existe</strong> : <code>models/saved/lstm_energy_forecast_latest_lstm_energy_forecast_{prm}.h5</code>
+- Si absent → message d'erreur avec suggestion : <code>python main.py train --prm {prm}</code></p>
+<hr />
+<h2 id="exemples">💡 Exemples<a class="headerlink" href="#exemples" title="Permanent link">&para;</a></h2>
+<h3 id="generer-pour-un-nouveau-site">Générer pour un nouveau site<a class="headerlink" href="#generer-pour-un-nouveau-site" title="Permanent link">&para;</a></h3>
+<pre><code class="language-bash"># 1. Entraîner le modèle
+python main.py train --prm 30000651332664
+
+# 2. Générer les prédictions
+python main.py predict-longterm --prm 30000651332664 --years 3 --add-trend
+
+# 3. Visualiser
+streamlit run dashboard_longterm.py
+# → Sélectionnez le site 30000651332664 dans le menu déroulant
+</code></pre>
+<h3 id="regenerer-pour-tous-les-sites">Régénérer pour tous les sites<a class="headerlink" href="#regenerer-pour-tous-les-sites" title="Permanent link">&para;</a></h3>
+<pre><code class="language-bash"># Régénérer toutes les prédictions
+python generate_all_predictions.py
+
+# Visualiser
+streamlit run dashboard_longterm.py
+</code></pre>
+<hr />
+<h2 id="aide-et-documentation">❓ Aide et Documentation<a class="headerlink" href="#aide-et-documentation" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Guide complet</strong> : <a href="../GUIDE_PREDICTIONS_LONGTERM/"><code>GUIDE_PREDICTIONS_LONGTERM.md</code></a></li>
+<li><strong>Dashboard</strong> : <a href="../DASHBOARD_GUIDE/"><code>DASHBOARD_GUIDE.md</code></a></li>
+<li><strong>Architecture</strong> : <a href="../DATA_ARCHITECTURE/"><code>DATA_ARCHITECTURE.md</code></a></li>
+<li><strong>Quick Start</strong> : <a href="../QUICK_START/"><code>QUICK_START.md</code></a></li>
+</ul>
+<hr />
+<h2 id="avantages-de-la-nouvelle-approche">🎉 Avantages de la nouvelle approche<a class="headerlink" href="#avantages-de-la-nouvelle-approche" title="Permanent link">&para;</a></h2>
+<p>✅ <strong>Plus simple</strong> : Juste le PRM, pas de chemins compliqués
+✅ <strong>Plus sûr</strong> : Vérifications automatiques des fichiers
+✅ <strong>Multi-sites</strong> : Dashboard avec sélection de site
+✅ <strong>Traçabilité</strong> : PRM dans les noms de fichiers
+✅ <strong>Batch</strong> : Script pour tous les sites en une fois</p>
+    </main>
+  </body>
+</html>

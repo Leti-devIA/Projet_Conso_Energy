@@ -12,7 +12,17 @@ import numpy as np
 import pickle
 from pathlib import Path
 
-from .feature_engineering import feature_engineering_pipeline
+from .feature_engineering import (
+    add_logistic_cap_floor,
+    create_holiday_features,
+    create_interaction_features,
+    create_lag_features,
+    create_rolling_features,
+    create_statistical_features,
+    create_temporal_features,
+    feature_engineering_pipeline,
+)
+from .preprocessing import aggregate_by_hour
 from .utils import load_config, build_jour_ferie_index
 
 # ===================================================
@@ -46,6 +56,45 @@ def load_prophet_model(model_dir="models/saved", prm=None):
     print(f"📦 Modèle chargé : {model_path.name}")
     with open(model_path, "rb") as f:
         return pickle.load(f)
+
+
+
+def build_features_from_history_df(history_df, prm, config_path="config/config.yaml"):
+    """
+    Construit les features directement depuis l'historique Dataclean.
+
+    Cela évite d'utiliser un CSV local potentiellement plus ancien que les
+    dernières données récupérées par l'API.
+    """
+    df = history_df.copy()
+    df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
+    df = df.dropna(subset=["datetime"]).sort_values("datetime").reset_index(drop=True)
+
+    if "puissance" in df.columns and "puissance_moy_heure" not in df.columns:
+        print("🔄 Agrégation horaire de l'historique Dataclean brut...")
+        df = aggregate_by_hour(df)
+
+    config = load_config(config_path)
+    target_col = config.get("target", "puissance_moy_heure")
+
+    if target_col not in df.columns:
+        raise ValueError(f"Colonne cible '{target_col}' manquante dans l'historique Dataclean.")
+
+    df = create_temporal_features(df)
+    df = create_lag_features(df, target_col)
+    df = create_rolling_features(df, target_col)
+    df = create_statistical_features(df, target_col)
+    df = create_interaction_features(df)
+    df = create_holiday_features(df)
+    df, config = add_logistic_cap_floor(df, config, prm=prm, config_path=config_path)
+
+    initial_len = len(df)
+    df = df.dropna()
+    removed = initial_len - len(df)
+    if removed > 0:
+        print(f"⚠️ {removed} lignes avec NaN supprimées (features depuis Dataclean)")
+
+    return df, config
 
 
 # ============================================================
@@ -116,6 +165,30 @@ def build_future_from_features(df_features, meteo_future_df, model):
         df_future['temp_x_heure_sin'] = df_future['temperature'] * df_future['heure_sin']
     if 'temp_x_heure_cos' in regressors and 'temperature' in df_future.columns:
         df_future['temp_x_heure_cos'] = df_future['temperature'] * df_future['heure_cos']
+
+    # ── Features thermiques (dérivées de la température future)
+    # IMPORTANT : calculer ici sinon elles valent 0 → prédictions hivernales fausses
+    if 'temperature' in df_future.columns:
+        _dju   = (18 - df_future['temperature']).clip(lower=0)
+        _heure = df_future['ds'].dt.hour
+        _mois  = df_future['ds'].dt.month
+        _pointe = _heure.isin([7, 8, 18, 19]).astype(int)
+        _hiver  = _mois.isin([11, 12, 1, 2, 3]).astype(int)
+
+        if 'dju_chauffage' in regressors:
+            df_future['dju_chauffage'] = _dju
+        if 'grand_froid' in regressors:
+            df_future['grand_froid'] = (df_future['temperature'] < 0).astype(int)
+        if 'tres_grand_froid' in regressors:
+            df_future['tres_grand_froid'] = (df_future['temperature'] < -5).astype(int)
+        if 'heure_pointe_hiver' in regressors:
+            df_future['heure_pointe_hiver'] = _pointe
+        if 'temp_x_pointe_hiver' in regressors:
+            df_future['temp_x_pointe_hiver'] = _dju * _pointe
+        if 'temp_x_hiver' in regressors:
+            df_future['temp_x_hiver'] = _dju * _hiver
+        if 'mois_hivernal' in regressors:
+            df_future['mois_hivernal'] = _hiver
 
     # ── Précipitation (pas dans météo future générée, on met 0)
     if 'precipitation' in regressors:
@@ -205,7 +278,7 @@ def build_future_from_features(df_features, meteo_future_df, model):
 # ============================================================
 # PREDICTION FUTURE
 # ============================================================
-def predict_future(prm, meteo_future_df, model_dir="models/saved", config_path="config/config.yaml"):
+def predict_future(prm, meteo_future_df, model_dir="models/saved", config_path="config/config.yaml", history_df=None):
     """
     Lance la prédiction pour un PRM à partir d'un DataFrame météo futur.
     """
@@ -216,8 +289,11 @@ def predict_future(prm, meteo_future_df, model_dir="models/saved", config_path="
     regressors = list(model.extra_regressors.keys())
     print(f"📋 Regressors attendus : {regressors}")
 
-    # ── Charger les features calculées pour ce PRM
-    df_features, _ = feature_engineering_pipeline(prm=prm, source='csv', config_path=config_path)
+    # ── Charger / construire les features calculées pour ce PRM
+    if history_df is not None:
+        df_features, _ = build_features_from_history_df(history_df, prm=prm, config_path=config_path)
+    else:
+        df_features, _ = feature_engineering_pipeline(prm=prm, source='csv', config_path=config_path)
 
     # ── Construire le DataFrame futur
     df_future = build_future_from_features(df_features, meteo_future_df, model)
@@ -244,6 +320,103 @@ def predict_future(prm, meteo_future_df, model_dir="models/saved", config_path="
 
 
 # ============================================================
+# PREDICTION MULTI-SITES
+# ============================================================
+def predict_all_sites(model_dir="models/saved", config_path="config/config.yaml", years=3, add_variability=False):
+    """
+    Lance la prédiction pour TOUS les sites qui ont un modèle sauvegardé.
+
+    Utilise les moyennes climatiques pour générer la météo future.
+    """
+    from pathlib import Path
+    from .generate_climate_averages import generate_climate_averages_pipeline
+
+    config = load_config(config_path)
+    model_dir = Path(model_dir)
+    raw_data_dir = Path(config["data"]["raw"]) / "sites"
+    pred_dir = Path(config["data"]["predictions"])
+    pred_dir.mkdir(parents=True, exist_ok=True)
+
+    # Lister les modèles disponibles
+    model_files = sorted(model_dir.glob("prophet_model_*_latest.pkl"))
+    if not model_files:
+        print(f"❌ Aucun modèle trouvé dans {model_dir}")
+        return {}
+
+    # Extraire les PRM depuis les noms de fichiers
+    prms = []
+    for f in model_files:
+        parts = f.stem.split("_")
+        if len(parts) >= 4:
+            prms.append(parts[2])
+
+    if not prms:
+        print("❌ Impossible d'extraire les PRM depuis les noms de modèles.")
+        return {}
+
+    print(f"✅ {len(prms)} site(s) détecté(s) :")
+    for p in prms:
+        print(f"   • {p}")
+    print()
+
+    results = {}
+
+    for prm in prms:
+        print("\n" + "─" * 60)
+        print(f"🔮 PRM : {prm}")
+        print("─" * 60)
+
+        historique_path = raw_data_dir / f"dataclean_prm_{prm}.csv"
+        if not historique_path.exists():
+            print(f"⚠️  Fichier historique introuvable → site ignoré")
+            results[prm] = "IGNORÉ (pas d'historique)"
+            continue
+
+        try:
+            # Génération météo future
+            print("🌦️  Génération de la météo future (moyennes climatiques)...")
+            meteo_future = generate_climate_averages_pipeline(
+                historique_path=str(historique_path),
+                output_path=None,
+                start_date=None,
+                nb_annees=years,
+                add_variability=add_variability,
+                config_path=config_path
+            )
+            print(f"   ✅ {len(meteo_future)} heures générées")
+
+            # Prédiction
+            df_predictions = predict_future(
+                prm=prm,
+                meteo_future_df=meteo_future,
+                model_dir=str(model_dir),
+                config_path=config_path
+            )
+
+            # Sauvegarde
+            output_path = pred_dir / f"predictions_{years}ans_{prm}.csv"
+            df_predictions.to_csv(output_path, index=False)
+            print(f"   💾 Sauvegardé : {output_path.name}")
+            results[prm] = f"✅ {output_path.name}"
+
+        except Exception as e:
+            import traceback
+            print(f"   ❌ ERREUR : {e}")
+            traceback.print_exc()
+            results[prm] = f"ÉCHEC : {str(e)[:50]}"
+
+    # Résumé final
+    print("\n" + "=" * 60)
+    print("RÉSUMÉ PRÉDICTIONS MULTI-SITES")
+    print("=" * 60)
+    for prm, status in results.items():
+        print(f"  {prm:<22}  {status}")
+    print("=" * 60)
+
+    return results
+
+
+# ============================================================
 # FORMAT POUR DASHBOARD
 # ============================================================
 def format_predictions_for_dashboard(df_pred, historique_start):
@@ -265,15 +438,29 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Prédiction Prophet long terme")
-    parser.add_argument("--prm", type=str, help="Numéro PRM (résout les chemins automatiquement)")
+    mode_group = parser.add_mutually_exclusive_group(required=True)
+    mode_group.add_argument("--prm", type=str, help="Numéro PRM (prédiction d'un seul site)")
+    mode_group.add_argument("--all-sites", action="store_true", help="Lancer la prédiction pour tous les sites")
     parser.add_argument("--historique", type=str, default=None, help="Fichier historique CSV")
     parser.add_argument("--meteo", type=str, default=None, help="Fichier météo CSV (horaire)")
     parser.add_argument("--horizon", type=int, default=None, help="Heures à prédire (défaut : config.yaml)")
+    parser.add_argument("--years", type=int, default=3, help="Horizon en années (utilisé avec --all-sites)")
+    parser.add_argument("--add-variability", action="store_true", help="Ajoute une variabilité météo (mode --all-sites)")
     parser.add_argument("--model-dir", type=str, default="models/saved")
     parser.add_argument("--config", type=str, default="config/config.yaml")
     parser.add_argument("--output", type=str, default=None, help="Fichier de sortie CSV")
 
     args = parser.parse_args()
+
+    # Mode multi-sites : boucle automatique
+    if args.all_sites:
+        predict_all_sites(
+            model_dir=args.model_dir,
+            config_path=args.config,
+            years=args.years,
+            add_variability=args.add_variability,
+        )
+        exit(0)
 
     # Mode PRM : résolution automatique des chemins
     if args.prm:
@@ -282,9 +469,10 @@ if __name__ == "__main__":
         args.output     = args.output     or f"data/predictions/prophet_predictions_{args.prm}.csv"
 
     if not args.historique or not args.meteo:
-        print("❌ Erreur : utilisez --prm ou (--historique + --meteo)")
-        print("  python src/predict.py --prm 30000250086126")
-        print("  python src/predict.py --historique data.csv --meteo meteo.csv --output out.csv")
+        print("❌ Erreur : utilisez --all-sites ou --prm (avec historique/météo auto ou fournis)")
+        print("  python -m src.predict --all-sites")
+        print("  python -m src.predict --prm 30000250086126")
+        print("  python -m src.predict --prm 30000250086126 --historique data.csv --meteo meteo.csv --output out.csv")
         exit(1)
 
     print(f"📂 Historique : {args.historique}")
@@ -300,6 +488,7 @@ if __name__ == "__main__":
     meteo_df = pd.read_csv(args.meteo)
     df_pred = predict_future(prm=args.prm, meteo_future_df=meteo_df,
                              model_dir=args.model_dir, config_path=args.config)
+
 
     # Formater pour le dashboard
     df_csv = format_predictions_for_dashboard(

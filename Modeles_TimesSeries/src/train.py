@@ -22,12 +22,20 @@ préprocessing -> features -> entraînement -> évaluation -> sauvegarde.
 
 import argparse
 import os
+import sys
+import io
 import pandas as pd
 import numpy as np
 import pickle
 import json
 from pathlib import Path
 from datetime import datetime
+
+# Forcer UTF-8 sur stdout/stderr pour éviter UnicodeEncodeError sous Windows (cp1252)
+if hasattr(sys.stdout, "buffer"):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "buffer"):
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 from .data_loader import get_data_loader
 from .utils import load_config, detect_prms
 from .preprocessing import preprocess_pipeline
@@ -87,8 +95,10 @@ def prepare_data_for_prophet(df, target_col, config):
     if missing:
         print(f"   ⚠️  Regressors absents : {missing}")
 
-    retained_extra = [c for c in regressors if c.startswith('puissance_')]
+    # Ne garder que les regressors effectivement présents dans le DataFrame
+    regressors = [c for c in regressors if c in df.columns]
 
+    retained_extra = [c for c in regressors if c.startswith('puissance_')]
     if retained_extra:
         print(f"   Regressors extra retenus : {retained_extra}")
 
@@ -405,8 +415,15 @@ def train_one_site(data_path, config, prm, config_path):
 
         # Modèle
         model = build_prophet_model(config, prm=prm)
+        # Régresseurs nécessitant une standardisation (échelles hétérogènes)
+        STANDARDIZE_COLS = {
+            'temperature', 'humidite', 'precipitation', 'couverture_nuages',
+            'vitesse_vent', 'dju_chauffage', 'temp_x_pointe_hiver', 'temp_x_hiver',
+            'temp_x_heure_sin', 'temp_x_heure_cos',
+        }
         for col in regressors:
-            model.add_regressor(col, standardize=False)
+            should_std = col in STANDARDIZE_COLS
+            model.add_regressor(col, standardize=should_std)
 
         print("\n--- Entraînement ---")
         fit_options = build_fit_options(config, prm=prm)

@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Guide grid search - Projet Modèles Time Series</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; background: #fafafa; color: #1f2937; }
+      header { background: #ffffff; border-bottom: 1px solid #e5e7eb; padding: 12px 20px; }
+      main { max-width: 960px; margin: 24px auto; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 24px; }
+      h1, h2, h3 { color: #111827; }
+      a { color: #2563eb; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      code { background: #f3f4f6; padding: 2px 5px; border-radius: 4px; }
+      pre code { display: block; padding: 12px; overflow-x: auto; }
+      nav a { margin-right: 12px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>Projet Modèles Time Series</strong>
+      <nav style="margin-top: 8px;">
+        
+          
+            <a href="..">Accueil</a>
+          
+            <a href="../QUICK_START/">Quick start</a>
+          
+            <a href="../DATA_ARCHITECTURE/">Architecture des données</a>
+          
+            <a href="../WORKFLOW_MULTI_SITES/">Workflow multi-sites</a>
+          
+            <a href="../GUIDE_PREDICTIONS_LONGTERM/">Guide prédictions long terme</a>
+          
+            <a href="../DASHBOARD_GUIDE/">Guide dashboard</a>
+          
+            <a href="../MLFLOW_GUIDE/">Guide MLflow</a>
+          
+            <a href="../GUIDE_CICD/">Guide CI/CD</a>
+          
+            <a href="../TESTING/">Guide tests</a>
+          
+            <a href="./">Guide grid search</a>
+          
+            <a href="../FORMULE_COUT_HORAIRE/">Formule coût horaire</a>
+          
+            <a href="../AMELIORATIONS_PROPHET/">Améliorations Prophet</a>
+          
+        
+      </nav>
+    </header>
+
+    <main>
+      <h1 id="guide-grid-search-prophet-mango">Guide Grid Search Prophet (Mango)<a class="headerlink" href="#guide-grid-search-prophet-mango" title="Permanent link">&para;</a></h1>
+<h2 id="objectif">🎯 Objectif<a class="headerlink" href="#objectif" title="Permanent link">&para;</a></h2>
+<p>Le script <code>src/grid_search.py</code> sert à trouver automatiquement les meilleurs hyperparamètres Prophet par site (PRM), puis à :</p>
+<ul>
+<li>sauvegarder les meilleurs paramètres,</li>
+<li>mettre à jour <code>site_overrides</code> dans <code>config/config.yaml</code>,</li>
+<li>exporter un résumé et le détail des essais,</li>
+<li>tracer les essais dans MLflow (si activé).</li>
+</ul>
+<p>La recherche est faite en 2 phases :</p>
+<ol>
+<li><strong>Trend</strong> (growth, changepoints)</li>
+<li><strong>Seasonality</strong> (mode + priors + fourier orders)</li>
+</ol>
+<p>Le moteur d’optimisation est <strong>Mango</strong> (<code>arm-mango</code>).</p>
+<hr />
+<h2 id="prerequis">✅ Prérequis<a class="headerlink" href="#prerequis" title="Permanent link">&para;</a></h2>
+<p>Depuis le dossier <code>Modeles_TimesSeries</code> :</p>
+<pre><code class="language-bash">pip install -r requirements.txt
+</code></pre>
+<p>Vérifier que <code>arm-mango</code> est bien présent (déjà ajouté dans <code>requirements.txt</code>).</p>
+<hr />
+<h2 id="configuration-grid_search-configyaml">⚙️ Configuration <code>grid_search</code> (config.yaml)<a class="headerlink" href="#configuration-grid_search-configyaml" title="Permanent link">&para;</a></h2>
+<p>Exemple recommandé (rapide et stable) :</p>
+<pre><code class="language-yaml">grid_search:
+  random_seed: 42
+
+  # Nombre d'essais par phase
+  n_iter_trend: 10
+  n_iter_season: 12
+
+  # Accélération
+  fast_mode: true
+  train_window_days: 365
+  max_train_rows: 5000
+  uncertainty_samples: 0
+  fit_algorithm: LBFGS
+  fit_iter: 300
+  fit_seed: 42
+
+  # Espace de recherche trend
+  growth: [flat]
+  changepoint_prior_scale: [0.001, 0.01, 0.05, 0.1, 0.3]
+  n_changepoints: [10, 25, 50]
+  changepoint_range: [0.8, 0.9, 0.95]
+
+  # Espace de recherche seasonality
+  seasonality_mode: [additive, multiplicative]
+  seasonality_prior_scale: [1.0, 5.0, 10.0, 20.0]
+  holidays_prior_scale: [5, 10, 20]
+  daily_fourier_order: [5, 15, 20]
+  weekly_fourier_order: [5, 15, 20]
+  yearly_fourier_order: [5, 15, 20]
+
+  # Métriques à minimiser
+  metric: [mae, rmse]
+</code></pre>
+<h3 id="comment-la-loss-est-calculee">Comment la loss est calculée<a class="headerlink" href="#comment-la-loss-est-calculee" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Si <code>metric: [mae, rmse]</code> → Mango optimise <code>mae + rmse</code>.</li>
+<li>Sinon → Mango optimise la somme des métriques demandées.</li>
+</ul>
+<p>Cela permet de chercher un compromis <strong>simultané</strong> entre MAE et RMSE.</p>
+<hr />
+<h2 id="lancer-le-grid-search">▶️ Lancer le grid search<a class="headerlink" href="#lancer-le-grid-search" title="Permanent link">&para;</a></h2>
+<h3 id="un-seul-site-recommande-pour-valider">Un seul site (recommandé pour valider)<a class="headerlink" href="#un-seul-site-recommande-pour-valider" title="Permanent link">&para;</a></h3>
+<pre><code class="language-bash">python -m src.grid_search --prm 30000250086126
+</code></pre>
+<h3 id="plusieurs-sites">Plusieurs sites<a class="headerlink" href="#plusieurs-sites" title="Permanent link">&para;</a></h3>
+<pre><code class="language-bash">python -m src.grid_search --prm 30000250086126 30000650805048
+</code></pre>
+<h3 id="tous-les-sites-trouves-dans-dataprocessed">Tous les sites trouvés dans <code>data/processed</code><a class="headerlink" href="#tous-les-sites-trouves-dans-dataprocessed" title="Permanent link">&para;</a></h3>
+<pre><code class="language-bash">python -m src.grid_search
+</code></pre>
+<hr />
+<h2 id="lire-la-sortie-console">📈 Lire la sortie console<a class="headerlink" href="#lire-la-sortie-console" title="Permanent link">&para;</a></h2>
+<p>À chaque essai, tu verras :</p>
+<ul>
+<li>les paramètres testés,</li>
+<li>les métriques (<code>mae</code>, <code>rmse</code>, etc.),</li>
+<li><code>Objective loss</code> (ce que Mango minimise),</li>
+<li>le temps de l’essai,</li>
+<li>l’ETA estimé.</li>
+</ul>
+<p>Exemple :</p>
+<pre><code class="language-text">[trend batch item 2/10 | essai 4/10] {...}
+→ mae = ... | rmse = ...
+   Objective loss: ...
+   Temps essai: ...s | Temps total: ...min | ETA: ...min
+</code></pre>
+<hr />
+<h2 id="fichiers-generes">💾 Fichiers générés<a class="headerlink" href="#fichiers-generes" title="Permanent link">&para;</a></h2>
+<p>Le script écrit :</p>
+<ul>
+<li><code>models/saved/prophet_best_params_&lt;PRM&gt;.json</code></li>
+<li><code>models/saved/grid_search_summary_&lt;timestamp&gt;.csv</code></li>
+<li><code>models/saved/grid_search_trials_&lt;timestamp&gt;.csv</code></li>
+</ul>
+<p>et met à jour :</p>
+<ul>
+<li><code>config/config.yaml</code> → <code>site_overrides[&lt;PRM&gt;]</code></li>
+</ul>
+<hr />
+<h2 id="mlflow-optionnel">🔬 MLflow (optionnel)<a class="headerlink" href="#mlflow-optionnel" title="Permanent link">&para;</a></h2>
+<p>Si <code>mlflow.enabled: true</code> dans la config :</p>
+<ul>
+<li>création d’un run par PRM,</li>
+<li>log des meilleurs paramètres,</li>
+<li>log des métriques globales,</li>
+<li>artifact CSV des essais.</li>
+</ul>
+<hr />
+<h2 id="ca-freeze-diagnostic-rapide">🐢 « Ça freeze » : diagnostic rapide<a class="headerlink" href="#ca-freeze-diagnostic-rapide" title="Permanent link">&para;</a></h2>
+<p>En pratique, ce n’est pas un freeze UI : c’est souvent un essai Prophet (Stan) qui calcule longtemps.</p>
+<h3 id="reglages-anti-lenteur">Réglages anti-lenteur<a class="headerlink" href="#reglages-anti-lenteur" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Baisser <code>n_iter_trend</code> / <code>n_iter_season</code> (ex: 4 et 6 pour debug)</li>
+<li>Garder <code>fast_mode: true</code></li>
+<li>Réduire <code>train_window_days</code> (ex: 180)</li>
+<li>Limiter <code>max_train_rows</code> (ex: 2000-5000)</li>
+<li>Laisser <code>uncertainty_samples: 0</code></li>
+<li>Utiliser <code>fit_algorithm: LBFGS</code></li>
+<li>Baisser <code>fit_iter</code> (ex: 150-300)</li>
+</ol>
+<h3 id="profil-debug-ultra-rapide">Profil « debug ultra rapide »<a class="headerlink" href="#profil-debug-ultra-rapide" title="Permanent link">&para;</a></h3>
+<pre><code class="language-yaml">grid_search:
+  n_iter_trend: 4
+  n_iter_season: 6
+  fast_mode: true
+  train_window_days: 180
+  max_train_rows: 2000
+  uncertainty_samples: 0
+  fit_algorithm: LBFGS
+  fit_iter: 150
+  metric: [mae, rmse]
+</code></pre>
+<hr />
+<h2 id="workflow-conseille">🧭 Workflow conseillé<a class="headerlink" href="#workflow-conseille" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Lancer sur <strong>1 PRM</strong> avec profil rapide</li>
+<li>Vérifier que les résultats sont cohérents</li>
+<li>Augmenter progressivement les itérations</li>
+<li>Étendre aux autres PRM</li>
+</ol>
+<hr />
+<h2 id="notes-importantes">❗ Notes importantes<a class="headerlink" href="#notes-importantes" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Le script suppose des données preprocessées disponibles dans <code>data/processed</code>.</li>
+<li>Si aucun regressor configuré n’est présent, le script s’arrête.</li>
+<li>Les meilleurs paramètres Prophet sont réinjectés automatiquement dans <code>site_overrides</code>.</li>
+</ul>
+<hr />
+<h2 id="commande-type-production-legere">Commande type (production légère)<a class="headerlink" href="#commande-type-production-legere" title="Permanent link">&para;</a></h2>
+<pre><code class="language-bash">python -m src.grid_search --prm 30000250086126
+</code></pre>
+<p>Puis vérifier :</p>
+<ol>
+<li>le JSON des best params,</li>
+<li>la ligne correspondante dans <code>site_overrides</code>,</li>
+<li>les CSV de summary/trials.</li>
+</ol>
+    </main>
+  </body>
+</html>

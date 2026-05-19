@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Formule coût horaire - Projet Modèles Time Series</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; background: #fafafa; color: #1f2937; }
+      header { background: #ffffff; border-bottom: 1px solid #e5e7eb; padding: 12px 20px; }
+      main { max-width: 960px; margin: 24px auto; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 24px; }
+      h1, h2, h3 { color: #111827; }
+      a { color: #2563eb; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      code { background: #f3f4f6; padding: 2px 5px; border-radius: 4px; }
+      pre code { display: block; padding: 12px; overflow-x: auto; }
+      nav a { margin-right: 12px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>Projet Modèles Time Series</strong>
+      <nav style="margin-top: 8px;">
+        
+          
+            <a href="..">Accueil</a>
+          
+            <a href="../QUICK_START/">Quick start</a>
+          
+            <a href="../DATA_ARCHITECTURE/">Architecture des données</a>
+          
+            <a href="../WORKFLOW_MULTI_SITES/">Workflow multi-sites</a>
+          
+            <a href="../GUIDE_PREDICTIONS_LONGTERM/">Guide prédictions long terme</a>
+          
+            <a href="../DASHBOARD_GUIDE/">Guide dashboard</a>
+          
+            <a href="../MLFLOW_GUIDE/">Guide MLflow</a>
+          
+            <a href="../GUIDE_CICD/">Guide CI/CD</a>
+          
+            <a href="../TESTING/">Guide tests</a>
+          
+            <a href="../GRID_SEARCH_GUIDE/">Guide grid search</a>
+          
+            <a href="./">Formule coût horaire</a>
+          
+            <a href="../AMELIORATIONS_PROPHET/">Améliorations Prophet</a>
+          
+        
+      </nav>
+    </header>
+
+    <main>
+      <h1 id="formule-de-calcul-du-cout-horaire">📐 Formule de Calcul du Coût Horaire<a class="headerlink" href="#formule-de-calcul-du-cout-horaire" title="Permanent link">&para;</a></h1>
+<h2 id="formule-complete">Formule complète<a class="headerlink" href="#formule-complete" title="Permanent link">&para;</a></h2>
+<pre><code>Coût_heure = volumes_achetés_futur × prix_achetés_volume_futur 
+           + prix_spot × (consommation_réelle_heure - volumes_achetés_futur)
+</code></pre>
+<h2 id="decomposition">Décomposition<a class="headerlink" href="#decomposition" title="Permanent link">&para;</a></h2>
+<h3 id="1-partie-contractuelle-volumes-achetes">1. Partie contractuelle (volumes achetés)<a class="headerlink" href="#1-partie-contractuelle-volumes-achetes" title="Permanent link">&para;</a></h3>
+<pre><code>Coût_contractuel = volumes_achetés × prix_achetés
+</code></pre>
+<p><strong>Exemples</strong> :
+- Vous avez un contrat pour acheter 300 kW/h à 45 €/MWh
+- Coût contractuel = 300 kW × 45 €/MWh / 1000 = <strong>13.50 €/h</strong></p>
+<h3 id="2-partie-spot-ecart">2. Partie spot (écart)<a class="headerlink" href="#2-partie-spot-ecart" title="Permanent link">&para;</a></h3>
+<pre><code>Coût_écart = prix_spot × (consommation_réelle - volumes_achetés)
+</code></pre>
+<p><strong>Cas 1 : Sur-consommation</strong> (consommation &gt; volumes achetés)
+- Consommation réelle = 350 kW
+- Volumes achetés = 300 kW
+- Écart = +50 kW (besoin d'acheter 50 kW supplémentaires)
+- Prix spot = 70 €/MWh
+- Coût écart = 70 × 50 / 1000 = <strong>+3.50 €/h</strong> (achat)</p>
+<p><strong>Cas 2 : Sous-consommation</strong> (consommation &lt; volumes achetés)
+- Consommation réelle = 250 kW
+- Volumes achetés = 300 kW
+- Écart = -50 kW (surplus de 50 kW à revendre)
+- Prix spot = 70 €/MWh
+- Coût écart = 70 × (-50) / 1000 = <strong>-3.50 €/h</strong> (revente/gain)</p>
+<h3 id="3-cout-total">3. Coût total<a class="headerlink" href="#3-cout-total" title="Permanent link">&para;</a></h3>
+<pre><code>Coût_total = Coût_contractuel + Coût_écart + Coût_acheminement + Taxes
+</code></pre>
+<h2 id="exemples-concrets">Exemples concrets<a class="headerlink" href="#exemples-concrets" title="Permanent link">&para;</a></h2>
+<h3 id="exemple-1-sur-consommation-en-heure-de-pointe">Exemple 1 : Sur-consommation en heure de pointe<a class="headerlink" href="#exemple-1-sur-consommation-en-heure-de-pointe" title="Permanent link">&para;</a></h3>
+<p><strong>Données</strong> :
+- Volumes achetés : 300 kW
+- Prix d'achat contractuel : 45 €/MWh
+- Consommation réelle : 380 kW
+- Prix spot : 85 €/MWh (heure de pointe)
+- TURPE : 0.05 €/kWh
+- Taxes : 20%</p>
+<p><strong>Calcul</strong> :</p>
+<pre><code>Coût_contractuel = 300 × 45 / 1000 = 13.50 €
+Coût_écart      = 85 × (380 - 300) / 1000 = 85 × 80 / 1000 = 6.80 €
+Coût_énergie    = 13.50 + 6.80 = 20.30 €
+
+Coût_TURPE      = 380 × 0.05 = 19.00 €
+Coût_avant_taxe = 20.30 + 19.00 = 39.30 €
+Taxes           = 39.30 × 0.20 = 7.86 €
+
+COÛT TOTAL      = 39.30 + 7.86 = 47.16 €
+</code></pre>
+<h3 id="exemple-2-sous-consommation-en-heure-creuse">Exemple 2 : Sous-consommation en heure creuse<a class="headerlink" href="#exemple-2-sous-consommation-en-heure-creuse" title="Permanent link">&para;</a></h3>
+<p><strong>Données</strong> :
+- Volumes achetés : 300 kW
+- Prix d'achat contractuel : 45 €/MWh
+- Consommation réelle : 200 kW
+- Prix spot : 25 €/MWh (heure creuse)
+- TURPE : 0.05 €/kWh
+- Taxes : 20%</p>
+<p><strong>Calcul</strong> :</p>
+<pre><code>Coût_contractuel = 300 × 45 / 1000 = 13.50 €
+Coût_écart      = 25 × (200 - 300) / 1000 = 25 × (-100) / 1000 = -2.50 € (gain)
+Coût_énergie    = 13.50 - 2.50 = 11.00 €
+
+Coût_TURPE      = 200 × 0.05 = 10.00 €
+Coût_avant_taxe = 11.00 + 10.00 = 21.00 €
+Taxes           = 21.00 × 0.20 = 4.20 €
+
+COÛT TOTAL      = 21.00 + 4.20 = 25.20 €
+</code></pre>
+<p><strong>Note</strong> : La revente du surplus (100 kW) au prix spot (25 €/MWh) réduit le coût global.</p>
+<h3 id="exemple-3-consommation-volumes-achetes">Exemple 3 : Consommation = Volumes achetés<a class="headerlink" href="#exemple-3-consommation-volumes-achetes" title="Permanent link">&para;</a></h3>
+<p><strong>Données</strong> :
+- Volumes achetés : 300 kW
+- Prix d'achat contractuel : 45 €/MWh
+- Consommation réelle : 300 kW
+- Prix spot : 60 €/MWh (n'a pas d'impact)
+- TURPE : 0.05 €/kWh
+- Taxes : 20%</p>
+<p><strong>Calcul</strong> :</p>
+<pre><code>Coût_contractuel = 300 × 45 / 1000 = 13.50 €
+Coût_écart      = 60 × (300 - 300) / 1000 = 0.00 € (pas d'écart)
+Coût_énergie    = 13.50 + 0.00 = 13.50 €
+
+Coût_TURPE      = 300 × 0.05 = 15.00 €
+Coût_avant_taxe = 13.50 + 15.00 = 28.50 €
+Taxes           = 28.50 × 0.20 = 5.70 €
+
+COÛT TOTAL      = 28.50 + 5.70 = 34.20 €
+</code></pre>
+<h2 id="strategies-doptimisation">Stratégies d'optimisation<a class="headerlink" href="#strategies-doptimisation" title="Permanent link">&para;</a></h2>
+<h3 id="1-arbitrage-prix-contractuel-vs-prix-spot">1. Arbitrage prix contractuel vs prix spot<a class="headerlink" href="#1-arbitrage-prix-contractuel-vs-prix-spot" title="Permanent link">&para;</a></h3>
+<p><strong>Situation</strong> : Prix spot souvent &lt; Prix contractuel</p>
+<p><strong>Action</strong> : 
+- Réduire les volumes achetés
+- Acheter davantage au spot
+- ⚠️ Attention à la volatilité du spot</p>
+<p><strong>Exemple</strong> :</p>
+<pre><code>Prix contractuel : 45 €/MWh
+Prix spot moyen : 35 €/MWh
+Économie potentielle : 10 €/MWh sur volumes non contractualisés
+</code></pre>
+<h3 id="2-lissage-de-la-consommation">2. Lissage de la consommation<a class="headerlink" href="#2-lissage-de-la-consommation" title="Permanent link">&para;</a></h3>
+<p><strong>Situation</strong> : Forte variabilité de la consommation</p>
+<p><strong>Action</strong> :
+- Volumes achetés = consommation moyenne
+- Évite les écarts importants
+- Limite l'exposition au spot</p>
+<p><strong>Exemple</strong> :</p>
+<pre><code>Consommation min : 200 kW
+Consommation moy : 300 kW
+Consommation max : 450 kW
+
+Option A : Acheter 300 kW (moyenne)
+  → Écart moyen : ±75 kW
+
+Option B : Acheter 450 kW (max)
+  → Pas d'achat spot mais beaucoup de revente
+
+Option C : Acheter 200 kW (min)
+  → Pas de revente mais beaucoup d'achat spot
+</code></pre>
+<h3 id="3-couverture-partielle">3. Couverture partielle<a class="headerlink" href="#3-couverture-partielle" title="Permanent link">&para;</a></h3>
+<p><strong>Situation</strong> : Incertitude sur la consommation future</p>
+<p><strong>Action</strong> :
+- Couvrir 70-80% de la consommation prévue
+- Garder de la flexibilité au spot</p>
+<p><strong>Exemple</strong> :</p>
+<pre><code>Consommation prévue : 350 kW
+Volumes achetés : 280 kW (80%)
+  → Exposition spot limitée à 20%
+  → Bénéficie des baisses de prix spot
+  → Couvert contre les hausses sur 80%
+</code></pre>
+<h2 id="comparaison-avec-lapproche-100-spot">Comparaison avec l'approche 100% spot<a class="headerlink" href="#comparaison-avec-lapproche-100-spot" title="Permanent link">&para;</a></h2>
+<h3 id="scenario-1-annee-consommation-moyenne-350-kw">Scénario : 1 année, consommation moyenne 350 kW<a class="headerlink" href="#scenario-1-annee-consommation-moyenne-350-kw" title="Permanent link">&para;</a></h3>
+<p><strong>Option A : 100% au spot (pas de contrat)</strong></p>
+<pre><code>Coût_énergie = consommation × prix_spot_moyen
+             = 350 kW × 45 €/MWh × 8760 h / 1000
+             = 137 970 €
+</code></pre>
+<p>✅ Avantages : Profite des baisses de prix
+❌ Risques : Exposé aux hausses (peut atteindre 100-200 €/MWh)</p>
+<p><strong>Option B : 80% contractuel, 20% spot</strong></p>
+<pre><code>Volumes achetés : 280 kW à 43 €/MWh (prix négocié)
+Écart moyen spot : 70 kW à 45 €/MWh (prix moyen)
+
+Coût_contractuel = 280 × 43 × 8760 / 1000 = 105 451 €
+Coût_spot        = 70 × 45 × 8760 / 1000 = 27 594 €
+Coût_total       = 133 045 €
+</code></pre>
+<p>✅ Avantages : Coût maîtrisé, exposition limitée
+✅ Économie : 4 925 € vs 100% spot (3.6%)</p>
+<p><strong>Option C : 100% contractuel</strong></p>
+<pre><code>Volumes achetés : 350 kW à 43 €/MWh
+Consommation exacte = volumes
+
+Coût_total = 350 × 43 × 8760 / 1000 = 131 814 €
+</code></pre>
+<p>✅ Avantages : Coût totalement fixe, aucune surprise
+❌ Inconvénients : Pas de revente possible si sous-conso</p>
+<h2 id="implementation-dans-le-code">Implémentation dans le code<a class="headerlink" href="#implementation-dans-le-code" title="Permanent link">&para;</a></h2>
+<h3 id="cas-1-volume-fixe">Cas 1 : Volume fixe<a class="headerlink" href="#cas-1-volume-fixe" title="Permanent link">&para;</a></h3>
+<pre><code class="language-python">volumes_achetes_kw = 300  # kW constant
+prix_achetes_eur_mwh = 45  # €/MWh
+
+df_calcul = calculator.calculer_cout_avec_parametres(
+    df_enrichi,
+    volumes_achetes_kw=300,
+    prix_achetes_eur_mwh=45,
+    tarif_acheminement_eur_kwh=0.05,
+    taux_taxe_pct=20.0
+)
+</code></pre>
+<h3 id="cas-2-volume-variable-de-la-conso">Cas 2 : Volume variable (% de la conso)<a class="headerlink" href="#cas-2-volume-variable-de-la-conso" title="Permanent link">&para;</a></h3>
+<pre><code class="language-python"># 80% de la consommation prédite
+volumes_achetes_kw = df_enrichi['puissance_kw_pred'] * 0.80
+prix_achetes_eur_mwh = 45
+
+df_calcul = calculator.calculer_cout_avec_parametres(
+    df_enrichi,
+    volumes_achetes_kw=volumes_achetes_kw,
+    prix_achetes_eur_mwh=45,
+    tarif_acheminement_eur_kwh=0.05,
+    taux_taxe_pct=20.0
+)
+</code></pre>
+<h3 id="cas-3-profil-horaire-specifique">Cas 3 : Profil horaire spécifique<a class="headerlink" href="#cas-3-profil-horaire-specifique" title="Permanent link">&para;</a></h3>
+<pre><code class="language-python"># Charger depuis un fichier
+df_contrat = pd.read_csv('contrat_achat.csv')
+# Colonnes : datetime, volume_achete_kw
+
+# Merger avec les prédictions
+df_merged = df_enrichi.merge(df_contrat, on='datetime', how='left')
+
+df_calcul = calculator.calculer_cout_avec_parametres(
+    df_merged,
+    volumes_achetes_kw=df_merged['volume_achete_kw'],
+    prix_achetes_eur_mwh=45,
+    tarif_acheminement_eur_kwh=0.05,
+    taux_taxe_pct=20.0
+)
+</code></pre>
+<h2 id="analyse-des-resultats">Analyse des résultats<a class="headerlink" href="#analyse-des-resultats" title="Permanent link">&para;</a></h2>
+<h3 id="colonnes-du-dataframe-resultant">Colonnes du DataFrame résultant<a class="headerlink" href="#colonnes-du-dataframe-resultant" title="Permanent link">&para;</a></h3>
+<p>Après calcul avec volumes achetés, le DataFrame contient :</p>
+<pre><code class="language-python">df_calcul.columns
+</code></pre>
+<ul>
+<li><code>datetime</code> : Date/heure</li>
+<li><code>conso_reelle_kw</code> : Consommation réelle (après ajustements)</li>
+<li><code>volumes_achetes_kw</code> : Volumes achetés contractuels</li>
+<li><code>prix_achetes_eur_mwh</code> : Prix d'achat contractuel</li>
+<li><code>ecart_kw</code> : Écart = conso_réelle - volumes_achetés</li>
+<li><code>prix_spot_eur_mwh</code> : Prix spot du marché</li>
+<li><code>cout_achat_contractuel_eur</code> : Coût de la partie contractuelle</li>
+<li><code>cout_ecart_spot_eur</code> : Coût/gain de l'écart (+ achat, - vente)</li>
+<li><code>cout_energie_eur</code> : Coût total énergie (contractuel + écart)</li>
+<li><code>cout_acheminement_eur</code> : Coût TURPE</li>
+<li><code>cout_avant_taxe_eur</code> : Coût avant taxes</li>
+<li><code>cout_taxe_eur</code> : Montant des taxes</li>
+<li><code>cout_total_eur</code> : Coût total final</li>
+</ul>
+<h3 id="kpis-cles-a-surveiller">KPIs clés à surveiller<a class="headerlink" href="#kpis-cles-a-surveiller" title="Permanent link">&para;</a></h3>
+<pre><code class="language-python"># 1. Taux de couverture
+taux_couverture = (df_calcul['volumes_achetes_kw'].sum() / 
+                   df_calcul['conso_reelle_kw'].sum() * 100)
+
+# 2. Heures d'achat spot
+nb_heures_achat = (df_calcul['ecart_kw'] &gt; 0).sum()
+
+# 3. Heures de revente spot
+nb_heures_vente = (df_calcul['ecart_kw'] &lt; 0).sum()
+
+# 4. Coût moyen spot payé/reçu
+cout_moyen_spot_achat = df_calcul[df_calcul['ecart_kw'] &gt; 0]['prix_spot_eur_mwh'].mean()
+prix_moyen_spot_vente = df_calcul[df_calcul['ecart_kw'] &lt; 0]['prix_spot_eur_mwh'].mean()
+
+# 5. Économie vs 100% spot
+cout_avec_contrat = df_calcul['cout_total_eur'].sum()
+cout_sans_contrat = (df_calcul['conso_reelle_kw'] * 
+                     df_calcul['prix_spot_eur_mwh'] / 1000).sum()
+economie = cout_sans_contrat - cout_avec_contrat
+</code></pre>
+<h2 id="conclusion">Conclusion<a class="headerlink" href="#conclusion" title="Permanent link">&para;</a></h2>
+<p>La formule avec volumes achetés permet :
+- ✅ De <strong>maîtriser</strong> une partie du budget (partie contractuelle)
+- ✅ De <strong>bénéficier</strong> des baisses de prix spot (sur l'écart)
+- ✅ De <strong>se protéger</strong> des hausses extrêmes (sur la partie couverte)
+- ✅ De <strong>revendre</strong> en cas de sous-consommation</p>
+<p>C'est l'approche la plus réaliste pour les entreprises qui ont des contrats d'achat d'électricité à terme.</p>
+    </main>
+  </body>
+</html>

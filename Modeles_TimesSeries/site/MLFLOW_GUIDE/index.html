@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Guide MLflow - Projet Modèles Time Series</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; background: #fafafa; color: #1f2937; }
+      header { background: #ffffff; border-bottom: 1px solid #e5e7eb; padding: 12px 20px; }
+      main { max-width: 960px; margin: 24px auto; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 24px; }
+      h1, h2, h3 { color: #111827; }
+      a { color: #2563eb; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      code { background: #f3f4f6; padding: 2px 5px; border-radius: 4px; }
+      pre code { display: block; padding: 12px; overflow-x: auto; }
+      nav a { margin-right: 12px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>Projet Modèles Time Series</strong>
+      <nav style="margin-top: 8px;">
+        
+          
+            <a href="..">Accueil</a>
+          
+            <a href="../QUICK_START/">Quick start</a>
+          
+            <a href="../DATA_ARCHITECTURE/">Architecture des données</a>
+          
+            <a href="../WORKFLOW_MULTI_SITES/">Workflow multi-sites</a>
+          
+            <a href="../GUIDE_PREDICTIONS_LONGTERM/">Guide prédictions long terme</a>
+          
+            <a href="../DASHBOARD_GUIDE/">Guide dashboard</a>
+          
+            <a href="./">Guide MLflow</a>
+          
+            <a href="../GUIDE_CICD/">Guide CI/CD</a>
+          
+            <a href="../TESTING/">Guide tests</a>
+          
+            <a href="../GRID_SEARCH_GUIDE/">Guide grid search</a>
+          
+            <a href="../FORMULE_COUT_HORAIRE/">Formule coût horaire</a>
+          
+            <a href="../AMELIORATIONS_PROPHET/">Améliorations Prophet</a>
+          
+        
+      </nav>
+    </header>
+
+    <main>
+      <h1 id="guide-mlflow-projet-consommation-energetique">Guide MLflow - Projet Consommation Énergétique<a class="headerlink" href="#guide-mlflow-projet-consommation-energetique" title="Permanent link">&para;</a></h1>
+<h2 id="quest-ce-que-mlflow-apporte">🎯 Qu'est-ce que MLflow apporte ?<a class="headerlink" href="#quest-ce-que-mlflow-apporte" title="Permanent link">&para;</a></h2>
+<p>MLflow remplace TensorBoard et ajoute des fonctionnalités MLOps pour Prophet :</p>
+<table>
+<thead>
+<tr>
+<th>Fonctionnalité</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Tracking</strong></td>
+<td>Historique de tous les entraînements avec métriques</td>
+</tr>
+<tr>
+<td><strong>Comparaison</strong></td>
+<td>Compare facilement plusieurs modèles</td>
+</tr>
+<tr>
+<td><strong>Versioning</strong></td>
+<td>Gestion des versions de modèles</td>
+</tr>
+<tr>
+<td><strong>Artéfacts</strong></td>
+<td>Stockage des graphiques et rapports</td>
+</tr>
+<tr>
+<td><strong>Registry</strong></td>
+<td>Registre centralisé des modèles</td>
+</tr>
+<tr>
+<td><strong>Reproductibilité</strong></td>
+<td>Environnements et paramètres sauvegardés</td>
+</tr>
+</tbody>
+</table>
+<h2 id="installation">📦 Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h2>
+<pre><code class="language-powershell">pip install mlflow
+</code></pre>
+<h2 id="utilisation">🚀 Utilisation<a class="headerlink" href="#utilisation" title="Permanent link">&para;</a></h2>
+<h3 id="1-entrainer-avec-tracking-mlflow">1. Entraîner avec tracking MLflow<a class="headerlink" href="#1-entrainer-avec-tracking-mlflow" title="Permanent link">&para;</a></h3>
+<p>Le tracking est <strong>automatique</strong> lors de l'entraînement :</p>
+<pre><code class="language-powershell">python src/train.py
+</code></pre>
+<p>MLflow enregistre automatiquement :
+- ✅ Paramètres Prophet (seasonality_mode, prior scales...)
+- ✅ Métriques de validation (MAE, RMSE, MAPE, R²)
+- ✅ Le modèle Prophet complet
+- ✅ Graphiques des prédictions et composantes
+- ✅ Résumé texte</p>
+<h3 id="2-visualiser-avec-lui-mlflow">2. Visualiser avec l'UI MLflow<a class="headerlink" href="#2-visualiser-avec-lui-mlflow" title="Permanent link">&para;</a></h3>
+<p>Lancer l'interface web :</p>
+<pre><code class="language-powershell">mlflow ui --port 5000
+</code></pre>
+<p>Puis ouvrir dans le navigateur : <strong>http://localhost:5000</strong></p>
+<p>Vous verrez :
+- 📊 Tableau de tous les runs avec métriques
+- 📈 Graphiques de comparaison
+- 🔍 Détails de chaque entraînement
+- 📁 Artefacts (modèles, graphiques)</p>
+<h3 id="3-comparer-plusieurs-modeles">3. Comparer plusieurs modèles<a class="headerlink" href="#3-comparer-plusieurs-modeles" title="Permanent link">&para;</a></h3>
+<pre><code class="language-python">from src.mlflow_utils import compare_models
+
+# Comparer tous les modèles par RMSE
+results = compare_models(
+    experiment_name=&quot;Prophet_Energy_Forecast&quot;,
+    metric=&quot;val_rmse&quot;
+)
+
+# Affiche le meilleur modèle et le classement
+print(results[['run_id', 'metrics.val_rmse', 'metrics.val_mae', 'params.site_prm']])
+</code></pre>
+<h3 id="4-charger-un-modele-depuis-mlflow">4. Charger un modèle depuis MLflow<a class="headerlink" href="#4-charger-un-modele-depuis-mlflow" title="Permanent link">&para;</a></h3>
+<pre><code class="language-python">from src.mlflow_utils import load_model_from_mlflow
+
+# Charger le modèle d'un run spécifique
+model = load_model_from_mlflow(run_id=&quot;abc123...&quot;)
+
+# Faire des prédictions
+forecast = model.predict(future_df)
+</code></pre>
+<h3 id="5-logger-des-predictions-long-terme">5. Logger des prédictions long terme<a class="headerlink" href="#5-logger-des-predictions-long-terme" title="Permanent link">&para;</a></h3>
+<pre><code class="language-python">from src.mlflow_utils import log_longterm_predictions
+
+# Après génération de prédictions 3 ans
+log_longterm_predictions(
+    df_predictions=predictions,
+    prm=&quot;30000250086126&quot;,
+    nb_annees=3
+)
+</code></pre>
+<h2 id="structure-mlflow">📂 Structure MLflow<a class="headerlink" href="#structure-mlflow" title="Permanent link">&para;</a></h2>
+<pre><code>Modeles_TimesSeries/
+├── mlruns/                    # Dossier MLflow
+│   ├── 0/                     # Experiment ID
+│   │   ├── &lt;run_id&gt;/          # Run individuel
+│   │   │   ├── artifacts/     # Modèle + graphiques
+│   │   │   ├── metrics/       # Métriques
+│   │   │   ├── params/        # Paramètres
+│   │   │   └── tags/          # Tags
+│   └── .trash/
+└── mlflow.db                  # Base de données (si backend SQL)
+</code></pre>
+<h2 id="configuration">🔧 Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>
+<p>Voir le fichier <code>config/config.yaml</code> à la racine du projet :</p>
+<pre><code class="language-yaml">mlflow:
+  tracking_uri: &quot;mlruns&quot;              # Local ou distant
+  experiment_name: &quot;Prophet_Energy_Forecast&quot;
+  artifact_location: &quot;mlruns&quot;
+</code></pre>
+<h3 id="tracking-distant-optionnel">Tracking distant (optionnel)<a class="headerlink" href="#tracking-distant-optionnel" title="Permanent link">&para;</a></h3>
+<p>Pour un serveur MLflow distant :</p>
+<pre><code class="language-yaml">mlflow:
+  tracking_uri: &quot;http://mlflow-server:5000&quot;
+</code></pre>
+<h2 id="metriques-trackees">📊 Métriques trackées<a class="headerlink" href="#metriques-trackees" title="Permanent link">&para;</a></h2>
+<h3 id="entrainement">Entraînement<a class="headerlink" href="#entrainement" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>val_mae</code> : Mean Absolute Error sur validation</li>
+<li><code>val_rmse</code> : Root Mean Squared Error</li>
+<li><code>val_mape</code> : Mean Absolute Percentage Error</li>
+<li><code>val_r2</code> : Coefficient de détermination R²</li>
+</ul>
+<h3 id="predictions-long-terme">Prédictions long terme<a class="headerlink" href="#predictions-long-terme" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>pred_mean_kw</code> : Consommation moyenne prédite</li>
+<li><code>pred_std_kw</code> : Écart-type</li>
+<li><code>pred_mean_kw_2026</code>, <code>pred_mean_kw_2027</code>, etc. : Par année</li>
+<li><code>confidence_interval_width</code> : Largeur moyenne intervalle confiance</li>
+</ul>
+<h2 id="workflow-type">🎯 Workflow type<a class="headerlink" href="#workflow-type" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Expérimenter</strong> : Entraîner plusieurs modèles avec différents paramètres</li>
+</ol>
+<pre><code class="language-powershell"># Modifier config/config.yaml (ex: seasonality_mode: additive)
+python src/train.py
+
+# Modifier à nouveau et ré-entraîner
+python src/train.py
+</code></pre>
+<ol>
+<li><strong>Comparer</strong> : Visualiser dans l'UI MLflow</li>
+</ol>
+<pre><code class="language-powershell">mlflow ui --port 5000
+</code></pre>
+<ol>
+<li>
+<p><strong>Sélectionner</strong> : Identifier le meilleur run</p>
+</li>
+<li>
+<p><strong>Déployer</strong> : Charger le modèle et générer prédictions</p>
+</li>
+</ol>
+<pre><code class="language-python">model = load_model_from_mlflow(run_id=&quot;best_run_id&quot;)
+</code></pre>
+<h2 id="integration-avec-vos-scripts">🔗 Intégration avec vos scripts<a class="headerlink" href="#integration-avec-vos-scripts" title="Permanent link">&para;</a></h2>
+<h3 id="trainpy"><code>train.py</code><a class="headerlink" href="#trainpy" title="Permanent link">&para;</a></h3>
+<p>✅ Déjà intégré automatiquement</p>
+<h3 id="predict_longtermpy"><code>predict_longterm.py</code><a class="headerlink" href="#predict_longtermpy" title="Permanent link">&para;</a></h3>
+<p>Ajoutez ceci après génération des prédictions :</p>
+<pre><code class="language-python">from mlflow_utils import log_longterm_predictions
+
+# À la fin de predict_longterm()
+if MLFLOW_AVAILABLE:
+    log_longterm_predictions(df_predictions, prm=prm, nb_annees=nb_annees)
+</code></pre>
+<h2 id="ressources">📚 Ressources<a class="headerlink" href="#ressources" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="https://mlflow.org/docs/latest/index.html">Documentation MLflow</a></li>
+<li><a href="https://mlflow.org/docs/latest/python_api/mlflow.prophet.html">MLflow Prophet Flavor</a></li>
+<li><a href="https://mlflow.org/docs/latest/tutorials-and-examples/index.html">Tutoriel MLflow</a></li>
+</ul>
+<h2 id="commandes-rapides">⚡ Commandes rapides<a class="headerlink" href="#commandes-rapides" title="Permanent link">&para;</a></h2>
+<pre><code class="language-powershell"># Lancer l'UI
+mlflow ui
+
+# Avec port spécifique
+mlflow ui --port 8080
+
+# Comparer modèles (Python)
+python -c &quot;from src.mlflow_utils import compare_models; compare_models()&quot;
+
+# Nettoyer les runs (attention !)
+# rm -r mlruns
+</code></pre>
+<h2 id="bonus-registry-de-modeles">🎁 Bonus : Registry de modèles<a class="headerlink" href="#bonus-registry-de-modeles" title="Permanent link">&para;</a></h2>
+<p>Pour mettre un modèle en production :</p>
+<pre><code class="language-python">import mlflow
+
+# Enregistrer le meilleur modèle
+mlflow.register_model(
+    model_uri=f&quot;runs:/{run_id}/model&quot;,
+    name=&quot;Prophet_Production&quot;
+)
+
+# Promouvoir en production
+client = mlflow.tracking.MlflowClient()
+client.transition_model_version_stage(
+    name=&quot;Prophet_Production&quot;,
+    version=1,
+    stage=&quot;Production&quot;
+)
+</code></pre>
+<hr />
+<p><strong>Auteur</strong> : GitHub Copilot
+<strong>Date</strong> : Février 2026
+<strong>Projet</strong> : Prédiction Consommation Énergétique (Prophet + MLflow)</p>
+    </main>
+  </body>
+</html>

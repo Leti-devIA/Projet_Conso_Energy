@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Guide CI/CD - Projet Modèles Time Series</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; background: #fafafa; color: #1f2937; }
+      header { background: #ffffff; border-bottom: 1px solid #e5e7eb; padding: 12px 20px; }
+      main { max-width: 960px; margin: 24px auto; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 24px; }
+      h1, h2, h3 { color: #111827; }
+      a { color: #2563eb; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      code { background: #f3f4f6; padding: 2px 5px; border-radius: 4px; }
+      pre code { display: block; padding: 12px; overflow-x: auto; }
+      nav a { margin-right: 12px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>Projet Modèles Time Series</strong>
+      <nav style="margin-top: 8px;">
+        
+          
+            <a href="..">Accueil</a>
+          
+            <a href="../QUICK_START/">Quick start</a>
+          
+            <a href="../DATA_ARCHITECTURE/">Architecture des données</a>
+          
+            <a href="../WORKFLOW_MULTI_SITES/">Workflow multi-sites</a>
+          
+            <a href="../GUIDE_PREDICTIONS_LONGTERM/">Guide prédictions long terme</a>
+          
+            <a href="../DASHBOARD_GUIDE/">Guide dashboard</a>
+          
+            <a href="../MLFLOW_GUIDE/">Guide MLflow</a>
+          
+            <a href="./">Guide CI/CD</a>
+          
+            <a href="../TESTING/">Guide tests</a>
+          
+            <a href="../GRID_SEARCH_GUIDE/">Guide grid search</a>
+          
+            <a href="../FORMULE_COUT_HORAIRE/">Formule coût horaire</a>
+          
+            <a href="../AMELIORATIONS_PROPHET/">Améliorations Prophet</a>
+          
+        
+      </nav>
+    </header>
+
+    <main>
+      <h1 id="guide-cicd-demarrage-rapide">🚀 Guide CI/CD - Démarrage Rapide<a class="headerlink" href="#guide-cicd-demarrage-rapide" title="Permanent link">&para;</a></h1>
+<h2 id="ce-qui-a-ete-configure">✅ Ce qui a été configuré<a class="headerlink" href="#ce-qui-a-ete-configure" title="Permanent link">&para;</a></h2>
+<p>Votre projet dispose maintenant d'un système CI/CD complet :</p>
+<h3 id="4-workflows-github-actions">📦 4 Workflows GitHub Actions<a class="headerlink" href="#4-workflows-github-actions" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong><code>ci.yml</code></strong> → Tests automatiques à chaque commit</li>
+<li><strong><code>cd-api-dataclean.yml</code></strong> → Déploiement API de nettoyage</li>
+<li><strong><code>cd-api-inference.yml</code></strong> → Déploiement API de prédiction</li>
+<li><strong><code>cd-dashboard.yml</code></strong> → Déploiement du dashboard Streamlit</li>
+</ol>
+<h3 id="3-scripts-utilitaires">🛠️ 3 Scripts Utilitaires<a class="headerlink" href="#3-scripts-utilitaires" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong><code>run_ci_tests.sh</code></strong> → Teste en local avant de push</li>
+<li><strong><code>build_and_push.sh</code></strong> → Build et push les images Docker</li>
+<li><strong><code>deploy.sh</code></strong> → Déploie tout le projet en local</li>
+</ol>
+<hr />
+<h2 id="utilisation-en-3-etapes">🎯 Utilisation en 3 Étapes<a class="headerlink" href="#utilisation-en-3-etapes" title="Permanent link">&para;</a></h2>
+<h3 id="etape-1-configurer-les-secrets-github">Étape 1 : Configurer les Secrets GitHub<a class="headerlink" href="#etape-1-configurer-les-secrets-github" title="Permanent link">&para;</a></h3>
+<p>Sur GitHub, allez dans <strong>Settings</strong> → <strong>Secrets and variables</strong> → <strong>Actions</strong></p>
+<p>Ajoutez ces 2 secrets minimum :
+- <code>DOCKER_USERNAME</code> : votre nom sur Docker Hub
+- <code>DOCKER_PASSWORD</code> : votre mot de passe Docker Hub</p>
+<blockquote>
+<p><strong>Pas de compte Docker Hub ?</strong> Créez-en un gratuitement : https://hub.docker.com</p>
+</blockquote>
+<hr />
+<h3 id="etape-2-tester-en-local">Étape 2 : Tester en Local<a class="headerlink" href="#etape-2-tester-en-local" title="Permanent link">&para;</a></h3>
+<pre><code class="language-bash"># Testez que tout fonctionne avant de push
+bash scripts/run_ci_tests.sh
+</code></pre>
+<p>Si ça passe ✅, vous êtes prêt à push !</p>
+<hr />
+<h3 id="etape-3-push-et-regarder-la-magie-operer">Étape 3 : Push et Regarder la Magie Opérer<a class="headerlink" href="#etape-3-push-et-regarder-la-magie-operer" title="Permanent link">&para;</a></h3>
+<pre><code class="language-bash">git add .
+git commit -m &quot;feat: ajout CI/CD&quot;
+git push origin main
+</code></pre>
+<p>Puis allez sur <strong>GitHub</strong> → <strong>Actions</strong> → Voyez les tests se lancer automatiquement ! 🎉</p>
+<hr />
+<h2 id="workflows-expliques-simplement">📊 Workflows Expliqués Simplement<a class="headerlink" href="#workflows-expliques-simplement" title="Permanent link">&para;</a></h2>
+<h3 id="ci-tests-automatiques-ciyml">CI - Tests Automatiques (<code>ci.yml</code>)<a class="headerlink" href="#ci-tests-automatiques-ciyml" title="Permanent link">&para;</a></h3>
+<p><strong>Quand ?</strong> À chaque <code>git push</code></p>
+<p><strong>Fait quoi ?</strong></p>
+<pre><code>1. Installe Python + dépendances
+2. Vérifie le code (flake8, ruff)
+3. Lance les tests unitaires
+4. Affiche la couverture de code
+</code></pre>
+<p><strong>Résultat :</strong> Badge ✅ ou ❌ visible sur GitHub</p>
+<hr />
+<h3 id="cd-deploiement-cd-yml">CD - Déploiement (<code>cd-*.yml</code>)<a class="headerlink" href="#cd-deploiement-cd-yml" title="Permanent link">&para;</a></h3>
+<p><strong>Quand ?</strong> Manuellement OU automatiquement si code change</p>
+<p><strong>Fait quoi ?</strong></p>
+<pre><code>1. Build une image Docker
+2. Push sur Docker Hub
+3. Prêt pour déploiement
+</code></pre>
+<p><strong>Résultat :</strong> Vos APIs sont déployables en un clic</p>
+<hr />
+<h2 id="pour-votre-certification">🎓 Pour Votre Certification<a class="headerlink" href="#pour-votre-certification" title="Permanent link">&para;</a></h2>
+<h3 id="points-cles-a-presenter">Points Clés à Présenter<a class="headerlink" href="#points-cles-a-presenter" title="Permanent link">&para;</a></h3>
+<p>✅ <strong>Pipeline CI/CD complète</strong>
+- Tests automatiques
+- Linting du code
+- Déploiement Docker automatisé</p>
+<p>✅ <strong>Bonnes Pratiques</strong>
+- Secrets sécurisés dans GitHub
+- Tests avant déploiement
+- Workflows séparés par service</p>
+<p>✅ <strong>Démonstration Live</strong>
+1. Montrez les workflows sur GitHub Actions
+2. Faites un commit → les tests se lancent
+3. Montrez les images sur Docker Hub</p>
+<hr />
+<h2 id="commandes-utiles">🧪 Commandes Utiles<a class="headerlink" href="#commandes-utiles" title="Permanent link">&para;</a></h2>
+<h3 id="tests-en-local">Tests en Local<a class="headerlink" href="#tests-en-local" title="Permanent link">&para;</a></h3>
+<pre><code class="language-bash"># Tous les tests du workflow CI
+bash scripts/run_ci_tests.sh
+
+# Seulement les tests unitaires
+pytest tests/ -v
+
+# Seulement le linting
+flake8 src/
+</code></pre>
+<h3 id="docker-en-local">Docker en Local<a class="headerlink" href="#docker-en-local" title="Permanent link">&para;</a></h3>
+<pre><code class="language-bash"># Déployer tout le projet
+bash scripts/deploy.sh
+
+# Build et push vers Docker Hub
+export DOCKER_USERNAME=&quot;votre-username&quot;
+bash scripts/build_and_push.sh
+
+# Voir les logs
+docker-compose logs -f
+</code></pre>
+<h3 id="workflows-manuels">Workflows Manuels<a class="headerlink" href="#workflows-manuels" title="Permanent link">&para;</a></h3>
+<p>Sur GitHub → <strong>Actions</strong> → Choisir un workflow → <strong>Run workflow</strong></p>
+<hr />
+<h2 id="comprendre-les-erreurs">🔍 Comprendre les Erreurs<a class="headerlink" href="#comprendre-les-erreurs" title="Permanent link">&para;</a></h2>
+<h3 id="connexion-docker-hub-failed">❌ "Connexion Docker Hub failed"<a class="headerlink" href="#connexion-docker-hub-failed" title="Permanent link">&para;</a></h3>
+<p><strong>Solution :</strong> Vérifiez vos secrets <code>DOCKER_USERNAME</code> et <code>DOCKER_PASSWORD</code></p>
+<h3 id="tests-failed">❌ "Tests failed"<a class="headerlink" href="#tests-failed" title="Permanent link">&para;</a></h3>
+<p><strong>Solution :</strong>
+1. Lancez <code>bash scripts/run_ci_tests.sh</code> en local
+2. Corrigez les tests qui échouent
+3. Re-push</p>
+<h3 id="build-failed">❌ "Build failed"<a class="headerlink" href="#build-failed" title="Permanent link">&para;</a></h3>
+<p><strong>Solution :</strong>
+1. Testez le build Docker en local : <code>cd api/api-dataclean &amp;&amp; docker build .</code>
+2. Vérifiez le <code>Dockerfile</code></p>
+<hr />
+<h2 id="checklist-certification">📝 Checklist Certification<a class="headerlink" href="#checklist-certification" title="Permanent link">&para;</a></h2>
+<p>Avant votre présentation, vérifiez :</p>
+<ul>
+<li>[ ] Les workflows CI/CD fonctionnent</li>
+<li>[ ] Au moins 1 workflow a été exécuté avec succès</li>
+<li>[ ] Les secrets sont configurés</li>
+<li>[ ] Vous comprenez chaque étape des workflows</li>
+<li>[ ] Vous pouvez expliquer CI vs CD</li>
+<li>[ ] Badge CI ajouté au README (optionnel)</li>
+</ul>
+<hr />
+<h2 id="badge-ci-pour-le-readme">🎁 Badge CI pour le README<a class="headerlink" href="#badge-ci-pour-le-readme" title="Permanent link">&para;</a></h2>
+<p>Ajoutez ce badge au début de votre <code>README.md</code> :</p>
+<pre><code class="language-markdown">![CI](https://github.com/USERNAME/REPO/workflows/CI%20-%20Tests%20et%20Validation/badge.svg)
+</code></pre>
+<p>Remplacez <code>USERNAME</code> et <code>REPO</code> par vos vraies valeurs.</p>
+<hr />
+<h2 id="pour-aller-plus-loin">📚 Pour Aller Plus Loin<a class="headerlink" href="#pour-aller-plus-loin" title="Permanent link">&para;</a></h2>
+<h3 id="sujets-avances-bonus-certification">Sujets Avancés (Bonus Certification)<a class="headerlink" href="#sujets-avances-bonus-certification" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Déploiement Cloud</strong> : Azure, AWS, GCP</li>
+<li><strong>Monitoring</strong> : Grafana, Prometheus</li>
+<li><strong>Notifications</strong> : Slack, Discord</li>
+<li><strong>Tests de Performance</strong> : Locust, k6</li>
+<li><strong>Sécurité</strong> : Scan de vulnérabilités (Trivy)</li>
+</ul>
+<h3 id="ressources">Ressources<a class="headerlink" href="#ressources" title="Permanent link">&para;</a></h3>
+<ul>
+<li><a href="https://docs.github.com/fr/actions">GitHub Actions Docs</a></li>
+<li><a href="https://docs.docker.com">Docker Docs</a></li>
+<li><a href="https://github.com/features/actions">CI/CD Best Practices</a></li>
+</ul>
+<hr />
+<h2 id="questions-frequentes">❓ Questions Fréquentes<a class="headerlink" href="#questions-frequentes" title="Permanent link">&para;</a></h2>
+<p><strong>Q : C'est quoi la différence entre CI et CD ?</strong>
+R : <strong>CI</strong> teste le code, <strong>CD</strong> le déploie. CI = qualité, CD = livraison.</p>
+<p><strong>Q : Dois-je payer pour GitHub Actions ?</strong>
+R : Non, c'est gratuit pour les repos publics et limité pour les privés.</p>
+<p><strong>Q : Puis-je utiliser GitLab CI au lieu de GitHub Actions ?</strong>
+R : Oui ! La logique est similaire, seule la syntaxe change.</p>
+<p><strong>Q : Combien de temps prend un workflow ?</strong>
+R : CI ≈ 2-5 min | CD ≈ 5-10 min (dépend de la taille des images)</p>
+<hr />
+<p><strong>🎉 Bravo ! Vous avez un vrai CI/CD professionnel !</strong></p>
+<p><strong>Besoin d'aide ?</strong> Lisez <code>.github/workflows/README.md</code> pour plus de détails.</p>
+<hr />
+<p><em>Guide créé avec le skill étudiant 🎓</em></p>
+    </main>
+  </body>
+</html>

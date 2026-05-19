@@ -165,13 +165,21 @@ if _payload_raw:
 else:
     FABRIC_NOTEBOOK_TRIGGER_PAYLOAD = _default_notebook_payload
 
+# Régénération automatique des prédictions au démarrage
+AUTO_REGENERATE_ON_STARTUP = _as_bool(
+    os.getenv("AUTO_REGENERATE_ON_STARTUP", "true")
+)
+
 
 # ============================================================
 # IMPORT DES ROUTERS (APIs)
 # ============================================================
 
 from app.routers.health import router as health_router
-from app.routers.predict import router as predict_router
+from app.routers.predict import (
+    router as predict_router,
+    trigger_regenerate_all_predictions_startup,
+)
 from app.routers.models import router as models_router
 from app.routers.sync import router as sync_router
 
@@ -213,6 +221,37 @@ app.include_router(health_router)
 app.include_router(sync_router)
 app.include_router(predict_router)
 app.include_router(models_router)
+
+
+# ============================================================
+# STARTUP : régénération globale (optionnelle)
+# ============================================================
+
+@app.on_event("startup")
+def startup_regenerate_predictions() -> None:
+    """
+    Lance (optionnellement) la régénération de tous les sites au boot.
+    """
+    if not AUTO_REGENERATE_ON_STARTUP:
+        print("[INFO] AUTO_REGENERATE_ON_STARTUP désactivé")
+        return
+
+    try:
+        result = trigger_regenerate_all_predictions_startup()
+        if result.get("started"):
+            print(
+                f"[INFO] Régénération startup lancée | "
+                f"job_id={result.get('job_id')} | "
+                f"sites={result.get('total_sites')}"
+            )
+        else:
+            print(
+                f"[INFO] Régénération startup non lancée | "
+                f"raison={result.get('reason')}"
+            )
+    except Exception as exc:
+        # On loggue l'erreur sans bloquer le démarrage de l'API
+        print(f"[WARNING] Startup régénération en erreur: {exc}")
 
 
 # ============================================================

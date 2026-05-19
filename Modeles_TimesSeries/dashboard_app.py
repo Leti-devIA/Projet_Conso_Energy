@@ -110,15 +110,14 @@ def _extract_prm_from_name(filename: str) -> str | None:
     return match.group(1) if match else None
 
 
-@st.cache_data
+@st.cache_data(ttl=60)
 def load_predictions() -> pd.DataFrame:
-    """Charge les prédictions uniquement depuis l'API/Fabric.
+    """Charge les prédictions depuis l'API inference.
 
-    Le dashboard ne déclenche plus de POST /predict.
-    Les prédictions doivent être générées et stockées côté Fabric (ex: Notebook Fabric).
+    Retourne un DataFrame avec une colonne 'source' (cache / fabric / csv)
+    pour afficher l'origine des données dans le dashboard.
     """
     try:
-        # Récupère d'abord la liste des sites pour savoir quels PRMs charger
         sites_df = load_sites()
         if sites_df.empty:
             return pd.DataFrame()
@@ -144,6 +143,9 @@ def load_predictions() -> pd.DataFrame:
                         df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
                         df["prm"] = prm
 
+                        # Source des données : cache / fabric / csv
+                        df["source"] = pred_data.get("source", "inconnu")
+
                         # Normaliser le nom de la colonne puissance
                         if "puissance_kw" not in df.columns:
                             if "puissance_moy_heure_pred" in df.columns:
@@ -151,7 +153,7 @@ def load_predictions() -> pd.DataFrame:
                             elif "puissance_kw_pred" in df.columns:
                                 df["puissance_kw"] = df["puissance_kw_pred"]
 
-                        df = df[["prm", "datetime", "puissance_kw"]].copy()
+                        df = df[["prm", "datetime", "puissance_kw", "source"]].copy()
                         frames.append(df)
                 else:
                     failed_prms.append((prm, pred_response.status_code))
@@ -863,6 +865,25 @@ elif len(selected_sites) == 1:
         st.info("Aucune métrique MLflow trouvée pour ce site.")
 
 st.subheader("Consommation dans le temps")
+
+# --- Indicateur source et fraîcheur des prédictions ---
+if "source" in filtered.columns:
+    source_icons = {"cache": "⚡", "fabric": "☁️", "csv": "💾", "recomputed": "🔄", "inconnu": "❓"}
+    previisions = filtered[filtered["data_type"] == "Prévision"] if "data_type" in filtered.columns else filtered
+    if not previisions.empty:
+        sources_df = previisions[["prm", "source", "datetime"]].copy()
+        premieres = (
+            sources_df.groupby(["prm", "source"])["datetime"]
+            .min()
+            .reset_index()
+            .rename(columns={"datetime": "pred_start"})
+        )
+        with st.expander("ℹ️ Source et fraîcheur des prédictions"):
+            for _, row in premieres.iterrows():
+                icon = source_icons.get(row["source"], "❓")
+                start_str = row["pred_start"].strftime("%d/%m/%Y %H:%M") if pd.notna(row["pred_start"]) else "inconnue"
+                st.caption(f"{icon} PRM {row['prm']} — source : **{row['source']}** | premières prédictions à partir du : {start_str}")
+
 st.plotly_chart(build_consumption_curve(filtered, aggregate=multi_site), use_container_width=True)
 
 if not filtered.empty:

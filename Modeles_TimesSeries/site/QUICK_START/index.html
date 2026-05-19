@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Quick start - Projet Modèles Time Series</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; background: #fafafa; color: #1f2937; }
+      header { background: #ffffff; border-bottom: 1px solid #e5e7eb; padding: 12px 20px; }
+      main { max-width: 960px; margin: 24px auto; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 24px; }
+      h1, h2, h3 { color: #111827; }
+      a { color: #2563eb; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      code { background: #f3f4f6; padding: 2px 5px; border-radius: 4px; }
+      pre code { display: block; padding: 12px; overflow-x: auto; }
+      nav a { margin-right: 12px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>Projet Modèles Time Series</strong>
+      <nav style="margin-top: 8px;">
+        
+          
+            <a href="..">Accueil</a>
+          
+            <a href="./">Quick start</a>
+          
+            <a href="../DATA_ARCHITECTURE/">Architecture des données</a>
+          
+            <a href="../WORKFLOW_MULTI_SITES/">Workflow multi-sites</a>
+          
+            <a href="../GUIDE_PREDICTIONS_LONGTERM/">Guide prédictions long terme</a>
+          
+            <a href="../DASHBOARD_GUIDE/">Guide dashboard</a>
+          
+            <a href="../MLFLOW_GUIDE/">Guide MLflow</a>
+          
+            <a href="../GUIDE_CICD/">Guide CI/CD</a>
+          
+            <a href="../TESTING/">Guide tests</a>
+          
+            <a href="../GRID_SEARCH_GUIDE/">Guide grid search</a>
+          
+            <a href="../FORMULE_COUT_HORAIRE/">Formule coût horaire</a>
+          
+            <a href="../AMELIORATIONS_PROPHET/">Améliorations Prophet</a>
+          
+        
+      </nav>
+    </header>
+
+    <main>
+      <h1 id="quick-start">Quick Start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h1>
+<h2 id="1-installer">1) Installer<a class="headerlink" href="#1-installer" title="Permanent link">&para;</a></h2>
+<pre><code class="language-bash">pip install -r requirements.txt
+</code></pre>
+<h2 id="2-lancer-les-apis">2) Lancer les APIs<a class="headerlink" href="#2-lancer-les-apis" title="Permanent link">&para;</a></h2>
+<pre><code class="language-bash">cd api/api-dataclean
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+</code></pre>
+<pre><code class="language-bash">cd ../../api/api-inference
+uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+</code></pre>
+<h2 id="3-lancer-le-dashboard">3) Lancer le dashboard<a class="headerlink" href="#3-lancer-le-dashboard" title="Permanent link">&para;</a></h2>
+<pre><code class="language-bash">cd ../..
+streamlit run dashboard_app.py
+</code></pre>
+<h2 id="4-lancer-la-doc-mkdocs">4) Lancer la doc MkDocs<a class="headerlink" href="#4-lancer-la-doc-mkdocs" title="Permanent link">&para;</a></h2>
+<pre><code class="language-bash">mkdocs serve
+</code></pre>
+    </main>
+  </body>
+</html>
