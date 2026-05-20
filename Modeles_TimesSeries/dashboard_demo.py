@@ -387,6 +387,28 @@ def build_custom_css() -> str:
     section[data-testid="stSidebar"] p {
         color: var(--text) !important;
     }
+    section[data-testid="stSidebar"] hr {
+        background: var(--secondary) !important;
+        opacity: 0.85;
+    }
+    .sidebar-filters-title {
+        text-align: center;
+        font-size: 2rem;
+        font-weight: 800;
+        letter-spacing: 0.01em;
+        color: var(--text);
+        padding: 0.45rem 0.65rem;
+        margin: 0rem 0 0.75rem 0;
+
+    }
+    .sidebar-field-label {
+        font-size: 1rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        margin: 0.5rem 0 1rem 0;
+    }
 
     /* ── Inputs ──────────────────────────────────── */
     .stTextInput > div > div > input,
@@ -567,23 +589,64 @@ def build_custom_css() -> str:
     /* ── User badge (header) ─────────────────────── */
     .user-badge {
         display: inline-flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.15rem;
+        padding: 0.4rem 0.9rem;
+        background: var(--primary-bg);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        font-size: 1.2rem;
+        color: var(--text);
+    }
+    .user-badge .user-role {
+        font-size: 0.89rem;
+        color: var(--primary);
+    }
+    .user-badge-wrapper {
+        display: flex;
         align-items: center;
         gap: 0.5rem;
         padding: 0.4rem 0.9rem;
         background: var(--primary-bg);
         border: 1px solid var(--border);
-        border-radius: 999px;
-        font-size: 0.82rem;
-        font-weight: 500;
-        color: var(--text);
+        border-radius: 12px;
+        margin-bottom: 0.55rem;
     }
-    .user-badge .user-role {
-        font-size: 0.68rem;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: var(--primary);
-        font-weight: 700;
+    .user-badge-wrapper .user-info {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
     }
+    .user-badge-wrapper .logout-btn-wrapper {
+        display: flex;
+        align-items: center;
+    }
+    .user-badge-wrapper .logout-btn-wrapper button {
+        padding: 0.3rem 0.6rem !important;
+        font-size: 0.85rem !important;
+        min-height: auto !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stHorizontalBlock"] {
+        align-items: stretch;
+        gap: 0 !important;
+        margin-bottom: 0.55rem;
+    }
+    section[data-testid="stSidebar"] [data-testid="stHorizontalBlock"] > div:last-child .stButton > button {
+        height: 100% !important;
+        border-radius: 0 12px 12px 0 !important;
+        border-left: none !important;
+        min-height: 52px !important;
+        font-size: 1.1rem !important;
+        background: var(--primary-bg) !important;
+        color: var(--text) !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stHorizontalBlock"] > div:last-child .stButton > button:hover {
+        background: var(--primary-bg) !important;
+        color: var(--danger) !important;
+        border-color: var(--danger) !important;
+}
 
     /* ── Dataframes ──────────────────────────────── */
     .stDataFrame {
@@ -1390,7 +1453,7 @@ if not st.session_state.authenticated:
         )
         st.markdown(
             '<div class="login-subtitle">'
-            "Pr\u00e9visions \u00b7 Prix \u00b7 Suivi mod\u00e8les IA</div>",
+            "Prévisions \u00b7 Prix \u00b7 Suivi mod\u00e8les IA</div>",
             unsafe_allow_html=True,
         )
 
@@ -1499,7 +1562,7 @@ def _check_freshness(label: str, last_date: pd.Timestamp | None) -> None:
         )
         _mlops_logger.warning(
             "WARNING - %s | dernière date=%s | âge=%d jours >= seuil alerte %d j",
-            label, last_date.strftime("%Y-%m-%d %H:%M"), _age_days, DATA_STALENESS_WARN_DAYS,
+            label, last_hist_date.strftime("%Y-%m-%d %H:%M"), _age_days, DATA_STALENESS_WARN_DAYS,
         )
     else:
         _mlops_logger.info(
@@ -1517,26 +1580,50 @@ for _na in check_negative_predictions(preds_df):
 
 # ── SIDEBAR ───────────────────────────────────────────────────────────────────
 with st.sidebar:
+    # Badge + logout dans un seul bloc HTML
     st.markdown(
-        f'<div class="user-badge" style="margin-bottom:0.9rem">'
-        f'<span>{current_username}</span>'
-        f'<span class="user-role">{current_role}</span>'
-        f'</div>',
+        f'''<div style="
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            background:var(--primary-bg);
+            border:1px solid var(--border);
+            border-radius:12px;
+            padding:0.5rem 0.75rem;
+            margin-bottom:0.55rem;
+            gap:0.5rem;
+        ">
+            <div style="display:flex;flex-direction:column;gap:0.1rem;flex:1">
+                <span style="font-size:0.95rem;font-weight:600;color:var(--text)">{current_username}</span>
+                <span style="font-size:0.82rem;color:var(--primary)">({current_role})</span>
+            </div>
+        </div>''',
         unsafe_allow_html=True,
     )
-    if st.button("Déconnexion", use_container_width=True, help="Se déconnecter", key="logout_sidebar"):
+
+    # Bouton Streamlit réel, stylé pour matcher le bloc au-dessus
+    if st.button(
+        "⏻",
+        use_container_width=True,
+        key="logout_sidebar",
+        type="tertiary",
+    ):
         for k in _defaults:
             st.session_state[k] = _defaults[k]
         st.rerun()
 
-    st.markdown("#### \U0001f50d Filtres")
+
+    st.markdown("---")
+    st.markdown('<div class="sidebar-filters-title">Filtres</div>', unsafe_allow_html=True)
 
     # Site
+    st.markdown('<div class="sidebar-field-label">Site</div>', unsafe_allow_html=True)
     site_options = sorted(preds_df["site_label"].unique())
     selected_site_filter = st.selectbox(
         "Site",
         ["Tous les sites"] + site_options,
         index=0,
+        label_visibility="collapsed",
     )
     if selected_site_filter == "Tous les sites":
         selected_sites     = site_options
@@ -1548,7 +1635,7 @@ with st.sidebar:
     # Historique
     show_historical = st.checkbox("Afficher l'historique", value=True)
 
-    st.markdown("**Période**")
+    st.markdown('<div class="sidebar-field-label">Période</div>', unsafe_allow_html=True)
 
     # Génère des jalons mensuels entre global_min_hist et global_max
     _slider_dates: list[pd.Timestamp] = []
@@ -1600,7 +1687,7 @@ with st.sidebar:
     # Gestion utilisateurs (admin)
     if current_role == "admin":
         st.markdown("---")
-        with st.expander("👥 Gestion des utilisateurs"):
+        with st.expander("Gestion des utilisateurs"):
             with st.form("create_user_form", clear_on_submit=True):
                 new_username = st.text_input("Nom d'utilisateur")
                 new_password = st.text_input("Mot de passe", type="password")

@@ -407,6 +407,27 @@ def build_custom_css() -> str:
     section[data-testid="stSidebar"] p {
         color: var(--text) !important;
     }
+    section[data-testid="stSidebar"] hr {
+        background: var(--secondary) !important;
+        opacity: 0.85;
+    }
+    .sidebar-filters-title {
+        text-align: center;
+        font-size: 2rem;
+        font-weight: 800;
+        letter-spacing: 0.01em;
+        color: var(--text);
+        padding: 0.45rem 0.65rem;
+        margin: 0rem 0 0.75rem 0;
+
+    }
+    .sidebar-field-label {
+        font-size: 1rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        margin: 0.5rem 0 1rem 0;
 
     /* ── Inputs ──────────────────────────────────── */
     .stTextInput > div > div > input,
@@ -1695,14 +1716,14 @@ preds_df  = load_predictions(); _prog.progress(75)
 hist_df   = load_historical_data(); _prog.progress(100)
 _prog.empty()
 
-show_data_sources_indicator(
-    {
-        "Sites": _get_data_source(sites_df),
-        "Prix": _get_data_source(prices_df),
-        "Prévisions": _get_data_source(preds_df),
-        "Historique": _get_data_source(hist_df),
-    }
-)
+# show_data_sources_indicator(
+#     {
+#         "Sites": _get_data_source(sites_df),
+#         "Prix": _get_data_source(prices_df),
+#         "Prévisions": _get_data_source(preds_df),
+#         "Historique": _get_data_source(hist_df),
+#     }
+# )
 
 # Garantir site_label
 for _df in (preds_df, hist_df):
@@ -1794,26 +1815,50 @@ for _na in check_negative_predictions(preds_df):
 
 # ── SIDEBAR ───────────────────────────────────────────────────────────────────
 with st.sidebar:
+    # Badge + logout dans un seul bloc HTML
     st.markdown(
-        f'<div class="user-badge" style="margin-bottom:0.9rem">'
-        f'<span>{current_username}</span>'
-        f'<span class="user-role">{current_role}</span>'
-        f'</div>',
+        f'''<div style="
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            background:var(--primary-bg);
+            border:1px solid var(--border);
+            border-radius:12px;
+            padding:0.5rem 0.75rem;
+            margin-bottom:0.55rem;
+            gap:0.5rem;
+        ">
+            <div style="display:flex;flex-direction:column;gap:0.1rem;flex:1">
+                <span style="font-size:0.95rem;font-weight:600;color:var(--text)">{current_username}</span>
+                <span style="font-size:0.82rem;color:var(--primary)">({current_role})</span>
+            </div>
+        </div>''',
         unsafe_allow_html=True,
     )
-    if st.button("Déconnexion", use_container_width=True, help="Se déconnecter", key="logout_sidebar"):
+
+    # Bouton Streamlit réel, stylé pour matcher le bloc au-dessus
+    if st.button(
+        "⏻",
+        use_container_width=True,
+        key="logout_sidebar",
+        type="tertiary",
+    ):
         for k in _defaults:
             st.session_state[k] = _defaults[k]
         st.rerun()
 
-    st.markdown("#### \U0001f50d Filtres")
+
+    st.markdown("---")
+    st.markdown('<div class="sidebar-filters-title">Filtres</div>', unsafe_allow_html=True)
 
     # Site
+    st.markdown('<div class="sidebar-field-label">Site</div>', unsafe_allow_html=True)
     site_options = sorted(preds_df["site_label"].unique())
     selected_site_filter = st.selectbox(
         "Site",
         ["Tous les sites"] + site_options,
         index=0,
+        label_visibility="collapsed",
     )
     if selected_site_filter == "Tous les sites":
         selected_sites     = site_options
@@ -1825,7 +1870,7 @@ with st.sidebar:
     # Historique
     show_historical = st.checkbox("Afficher l'historique", value=True)
 
-    st.markdown("**Période**")
+    st.markdown('<div class="sidebar-field-label">Période</div>', unsafe_allow_html=True)
 
     # Génère des jalons mensuels entre global_min_hist et global_max
     _slider_dates: list[pd.Timestamp] = []
@@ -1877,7 +1922,7 @@ with st.sidebar:
     # Gestion utilisateurs (admin)
     if current_role == "admin":
         st.markdown("---")
-        with st.expander("👥 Gestion des utilisateurs"):
+        with st.expander("Gestion des utilisateurs"):
             with st.form("create_user_form", clear_on_submit=True):
                 new_username = st.text_input("Nom d'utilisateur")
                 new_password = st.text_input("Mot de passe", type="password")
@@ -1885,7 +1930,6 @@ with st.sidebar:
                 if st.form_submit_button("Créer", use_container_width=True):
                     ok, msg = create_user(new_username, new_password, new_role)
                     (st.success if ok else st.error)(msg)
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # FILTRAGE
