@@ -6,6 +6,7 @@ import asyncio
 from contextlib import asynccontextmanager
 
 load_dotenv()
+pyodbc.pooling = False
 
 class DatabaseManager:
     def __init__(self):
@@ -128,7 +129,8 @@ def create_new_connection():
         f"Authentication=ActiveDirectoryPassword;"
         f"UID={username};PWD={password};"
         f"Encrypt=yes;TrustServerCertificate=yes;"
+        f"MARS_Connection=Yes;"
         f"Connection Timeout=60;"
     )
 
-    return pyodbc.connect(connection_string)
+    return pyodbc.connect(connection_string, autocommit=True)

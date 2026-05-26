@@ -44,8 +44,8 @@ API_INFERENCE_URL = os.getenv("API_INFERENCE_URL", "http://localhost:8001")
 API_DATACLEAN_URL = os.getenv("API_DATACLEAN_URL", "http://localhost:8000")
 API_KEY = os.getenv("API_KEY", "dev-inference-key")
 
-HIST_BATCH_CHUNK_SIZE = int(os.getenv("HIST_BATCH_CHUNK_SIZE", "4"))
-HIST_BATCH_READ_TIMEOUT = float(os.getenv("HIST_BATCH_READ_TIMEOUT", "120"))
+HIST_BATCH_CHUNK_SIZE = int(os.getenv("HIST_BATCH_CHUNK_SIZE", "2"))
+HIST_BATCH_READ_TIMEOUT = float(os.getenv("HIST_BATCH_READ_TIMEOUT", "240"))
 
 
 def _chunked(items: list[str], size: int):
@@ -907,11 +907,21 @@ def load_historical_data() -> pd.DataFrame:
                         params=[("prms", p) for p in prms_chunk],
                     )
                     if resp.status_code != 200:
+                        _mlops_logger.warning(
+                            "Batch historique ignoré: status=%s, prms=%s",
+                            resp.status_code,
+                            prms_chunk,
+                        )
                         continue
                     rows = resp.json().get("rows", [])
                     if rows:
                         frames.append(pd.DataFrame(rows))
-                except Exception:
+                except Exception as exc:
+                    _mlops_logger.warning(
+                        "Batch historique en échec pour prms=%s: %s",
+                        prms_chunk,
+                        exc,
+                    )
                     continue
 
         if not frames:

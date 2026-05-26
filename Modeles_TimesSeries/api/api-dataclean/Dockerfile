@@ -2,6 +2,9 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
 # Dépendances système
 RUN apt-get update && apt-get install -y \
     curl \

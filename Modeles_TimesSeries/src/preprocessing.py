@@ -7,7 +7,10 @@ Objectif pédagogique :
 - préparer les colonnes nécessaires au feature engineering.
 """
 import pandas as pd
-import holidays
+try:
+    import holidays
+except ImportError:  # Fallback simple si la dépendance n'est pas installée
+    holidays = None
 from .utils import load_config
 from .data_loader import get_data_loader
 
@@ -73,10 +76,14 @@ def add_jour_ferie(df):
     df = df.copy()
 
     if 'jour_ferie' not in df.columns:
-        jours_feries_fr = holidays.France()
-        df['jour_ferie'] = df['datetime'].dt.normalize().map(
-            lambda d: int(d.date() in jours_feries_fr)
-        )
+        if holidays is not None:
+            jours_feries_fr = holidays.France()
+            df['jour_ferie'] = df['datetime'].dt.normalize().map(
+                lambda d: int(d.date() in jours_feries_fr)
+            )
+        else:
+            # Sans la librairie, on garde une colonne neutre pour ne pas bloquer le pipeline
+            df['jour_ferie'] = 0
         print(f"✅ Colonne 'jour_ferie' ajoutée ({df['jour_ferie'].sum()} jours fériés)")
 
     return df

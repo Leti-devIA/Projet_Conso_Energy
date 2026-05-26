@@ -1,10 +1,12 @@
-from asyncio.log import logger
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers.dataclean import router as dataclean_router
 from app.config.database import connect_database
 from dotenv import load_dotenv
 import uvicorn
+
+logger = logging.getLogger("uvicorn.error")
 
 # Charger les variables d'environnement
 load_dotenv()

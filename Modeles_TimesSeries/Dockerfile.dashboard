@@ -1,0 +1,20 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+COPY requirements-dashboard.txt /app/requirements-dashboard.txt
+
+RUN pip install --upgrade pip \
+    && pip install -r /app/requirements-dashboard.txt
+
+COPY dashboard_app.py /app/dashboard_app.py
+COPY src /app/src
+COPY data /app/data
+
+EXPOSE 8501
+
+CMD ["streamlit", "run", "dashboard_app.py", "--server.address=0.0.0.0", "--server.port=8501"]

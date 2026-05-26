@@ -17,6 +17,29 @@ Le dashboard s'ouvre automatiquement dans le navigateur à l'adresse `http://loc
 
 Prérequis : l'API Inference doit être accessible (locale ou Docker).
 
+### Lancement avec Docker Compose
+
+```bash
+# Depuis Modeles_TimesSeries/
+docker compose up --build api-dataclean api-inference dashboard
+```
+
+Accès :
+
+- Dashboard : `http://localhost:8501`
+- API Inference : `http://localhost:8001`
+- API Dataclean : `http://localhost:8000`
+
+Persistance des modèles entraînés (mode Docker) :
+
+- Les nouveaux modèles sont stockés dans le volume Docker nommé `trained-models`.
+- Ils survivent aux redémarrages/rebuild de conteneurs.
+
+Authentification en mode Docker :
+
+- Le dashboard monte le fichier local `users.db` dans le conteneur (`/app/users.db`).
+- Les utilisateurs créés hors Docker ou depuis l'interface restent donc utilisables après redémarrage.
+
 ---
 
 ## Architecture
@@ -26,15 +49,15 @@ dashboard_app.py
 │
 ├── Connexion à API Inference (http://localhost:8001)
 │   ├── GET /models/list           → liste des PRM disponibles
-│   ├── GET /predictions/prm/latest → récupère les prédictions
+│   ├── GET /predictions/prm/{prm}/latest → récupère les prédictions
 │   └── POST /predict/prm/{prm}   → déclenche une nouvelle prédiction
 │
 ├── Sections du dashboard
-│   ├── Sélection du site (PRM)
-│   ├── Courbe de prédiction vs historique
-│   ├── Métriques de performance (MAE, RMSE, MAPE, R²)
-│   ├── Décomposition des composantes Prophet
-│   └── Estimateur de coût horaire
+│   ├── Authentification / rôles
+│   ├── Vue prévisions (historique + forecast)
+│   ├── Prix spot & indicateurs énergétiques
+│   ├── Simulation d'achats à terme
+│   └── Administration (rôle admin)
 ```
 
 ---
@@ -60,7 +83,33 @@ Les intervalles de confiance représentent la plage dans laquelle la vraie valeu
 | MAPE | Erreur relative en % — attention aux valeurs proches de zéro |
 | R² | Coefficient de détermination — 1 = prédiction parfaite |
 
-### 4. Décomposition Prophet
+### 4. Simulation d'achat à terme
+
+Permet de comparer un scénario de référence vs un scénario simulé :
+
+- achats/ventes (BaseLoad, Peakload, OffPeak, bloc custom),
+- volumes (MW), prix (€/MWh), fenêtre horaire et type de jours,
+- impact sur le coût total et le prix moyen d'approvisionnement.
+
+Le module de calcul est porté par `src/simulation_engine.py`.
+
+### 5. Administration (rôle admin)
+
+La section administration permet de gérer les utilisateurs et les droits.
+
+### 6. Prix et coût énergétique
+
+Le dashboard combine :
+
+- prévisions de consommation,
+- prix spot,
+- portefeuille d'achats,
+
+pour estimer le coût énergétique.
+
+Voir la [Formule coût horaire](FORMULE_COUT_HORAIRE.md) pour le détail du calcul.
+
+### 7. Décomposition Prophet
 
 Visualise les composantes extraites par Prophet :
 
@@ -70,25 +119,13 @@ Visualise les composantes extraites par Prophet :
 - **Saisonnalité annuelle** : variations saisonnières
 - **Effet jours fériés** : impact des fériés
 
-### 5. Estimateur de coût horaire
-
-Permet d'estimer le coût de l'énergie heure par heure en combinant :
-
-- les prédictions de consommation,
-- les prix spot importés,
-- les volumes contractuels achetés.
-
-Voir la [Formule coût horaire](FORMULE_COUT_HORAIRE.md) pour le détail du calcul.
-
----
-
 ## Déclencher une prédiction depuis le dashboard
 
 Si aucune prédiction n'est encore disponible pour un PRM, ou si vous souhaitez en générer une nouvelle :
 
 1. Sélectionner le PRM dans la liste.
 2. Cliquer sur **"Lancer une prédiction"**.
-3. Le dashboard appelle `POST /predict/prm/{prm}` et affiche les résultats après quelques secondes.
+3. Le dashboard appelle `POST /predict/prm/{prm}` puis recharge `GET /predictions/prm/{prm}/latest`.
 
 ---
 
@@ -109,4 +146,12 @@ Dans `api/api-inference/.env` :
 CORS_ORIGINS=http://localhost:8501
 ```
 
-Cela autorise le dashboard à appeler l'API Inference depuis le navigateur.
+Cela autorise les appels cross-origin côté navigateur lorsque nécessaire.
+
+Variables utiles côté dashboard (Docker Compose) :
+
+```env
+API_INFERENCE_URL=http://api-inference:8001
+API_DATACLEAN_URL=http://api-dataclean:8000
+API_KEY=dev-inference-key
+```

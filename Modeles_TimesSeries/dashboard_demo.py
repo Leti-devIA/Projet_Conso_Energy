@@ -1,4 +1,4 @@
-"""
+﻿"""
 Dashboard Streamlit - Prévisions consommation & prix énergie.
 
 Structure attendue :
@@ -399,7 +399,6 @@ def build_custom_css() -> str:
         color: var(--text);
         padding: 0.45rem 0.65rem;
         margin: 0rem 0 0.75rem 0;
-
     }
     .sidebar-field-label {
         font-size: 1rem;
@@ -506,20 +505,19 @@ def build_custom_css() -> str:
     }
 
     /* ── Section blocks ──────────────────────────── */
-    .section-block { margin-top: 2.5rem; }
+    .section-block { margin-top: 2rem; }
     .section-heading {
-        display: flex;
-        align-items: center;
-        gap: 0.8rem;
-        padding: 0.8rem 1rem;
-        margin-bottom: 1.2rem;
-        background: var(--primary-bg);
-        border-radius: 12px;
-        border: 1px solid var(--border);
+        text-align: center;
+        font-size: 2rem;
+        font-weight: 800;
+        letter-spacing: 0.01em;
+        color: var(--text);
+        padding: 0.2rem 0.2rem;
+        margin: 0rem 0 0.2rem 0;
     }
     .section-heading h2 {
-        font-size: 1.2rem;
-        font-weight: 700;
+        font-size: 2rem;
+        font-weight: 800;
         margin: 0;
         color: var(--text);
         letter-spacing: -0.01em;
@@ -873,11 +871,75 @@ def load_achats() -> pd.DataFrame:
         if date_col in out.columns:
             out[date_col] = pd.to_datetime(out[date_col], errors="coerce")
 
-    for num_col in ["VOLUME_TOTAL_PERIODE", "COUT_TOTAL_PERIODE", "PRIX_MOYEN"]:
+    for num_col in ["VOLUME_TOTAL_PERIODE", "COUT_TOTAL_PERIODE", "PRIX_MOYEN",
+                    "PRIX_FIXATION", "FIXATION_PUISSANCE_ACHAT_MW"]:
         if num_col in out.columns:
             out[num_col] = pd.to_numeric(out[num_col], errors="coerce")
 
+    # ── Normalisation des colonnes Enedis ─────────────────────────────────
+    # PRIX_FIXATION → PRIX_MOYEN (alias)
+    if "PRIX_MOYEN" not in out.columns and "PRIX_FIXATION" in out.columns:
+        out["PRIX_MOYEN"] = out["PRIX_FIXATION"]
+
+    # Calculer VOLUME_TOTAL_PERIODE depuis MW × heures si absent
+    if "VOLUME_TOTAL_PERIODE" not in out.columns and "FIXATION_PUISSANCE_ACHAT_MW" in out.columns:
+        if "DEB_PERIODE" in out.columns and "FIN_PERIODE" in out.columns:
+            _heures = (
+                (out["FIN_PERIODE"] - out["DEB_PERIODE"])
+                .dt.total_seconds()
+                .div(3600)
+                .clip(lower=0)
+            )
+            out["VOLUME_TOTAL_PERIODE"] = out["FIXATION_PUISSANCE_ACHAT_MW"].fillna(0) * _heures
+
+    # Calculer COUT_TOTAL_PERIODE si absent
+    if "COUT_TOTAL_PERIODE" not in out.columns:
+        _vol = out.get("VOLUME_TOTAL_PERIODE", pd.Series(dtype=float))
+        _prix = out.get("PRIX_MOYEN", pd.Series(dtype=float))
+        if not _vol.empty and not _prix.empty:
+            out["COUT_TOTAL_PERIODE"] = _vol.fillna(0) * _prix.fillna(0)
+
     return out
+
+def formate_mwh(val: float) -> str:
+    return f"{val:,.0f} MWh".replace(",", " ")
+
+
+def format_int_space(val: float) -> str:
+    return f"{val:,.0f}".replace(",", " ")
+
+
+def consumption_mwh_for_year(df: pd.DataFrame, year: int) -> float:
+    """Consommation annuelle en MWh avec intervalle réel entre mesures."""
+    if df.empty:
+        return 0.0
+
+    col_kw = next((c for c in ["puissance_kw", "puissance_moy_heure"] if c in df.columns), None)
+    if col_kw is None or "datetime" not in df.columns:
+        return 0.0
+
+    year_start = pd.Timestamp(year=year, month=1, day=1)
+    year_end = pd.Timestamp(year=year, month=12, day=31, hour=23, minute=59, second=59)
+    mask = (df["datetime"] >= year_start) & (df["datetime"] <= year_end)
+    group_col = next((c for c in ["prm", "site_label"] if c in df.columns), None)
+    cols = ["datetime", col_kw] + ([group_col] if group_col else [])
+    year_df = df.loc[mask, cols].copy()
+    if year_df.empty:
+        return 0.0
+
+    if group_col:
+        year_df = year_df.sort_values([group_col, "datetime"]).copy()
+        delta_h = year_df.groupby(group_col)["datetime"].diff().dt.total_seconds().div(3600)
+        median_h = delta_h.groupby(year_df[group_col]).transform("median")
+        year_df["interval_h"] = delta_h.fillna(median_h).fillna(1.0)
+    else:
+        year_df = year_df.sort_values("datetime").copy()
+        delta_h = year_df["datetime"].diff().dt.total_seconds().div(3600)
+        year_df["interval_h"] = delta_h.fillna(delta_h.median()).fillna(1.0)
+
+    year_df["interval_h"] = year_df["interval_h"].clip(lower=1 / 60, upper=24)
+    year_df["energy_mwh"] = year_df[col_kw] * year_df["interval_h"] / 1000.0
+    return float(year_df["energy_mwh"].sum())
 
 
 def purchased_volume_mwh_for_year(df: pd.DataFrame, year: int) -> float:
@@ -910,6 +972,77 @@ def purchased_volume_mwh_for_year(df: pd.DataFrame, year: int) -> float:
         total_mwh += df[df["DATE_ACHAT"].dt.year == year]["VOLUME_TOTAL_PERIODE"].fillna(0).sum()
 
     return float(total_mwh)
+
+
+def purchased_components_for_period(df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> tuple[float, float]:
+    """
+    Retourne (volume_mwh, prix_moyen_eur_mwh) des achats attribuables à une période,
+    avec prorata sur les périodes chevauchantes.
+    """
+    if df.empty or "VOLUME_TOTAL_PERIODE" not in df.columns:
+        return 0.0, 0.0
+
+    start = pd.to_datetime(start)
+    end = pd.to_datetime(end)
+    if pd.isna(start) or pd.isna(end) or end < start:
+        return 0.0, 0.0
+
+    volume_mwh = 0.0
+    cost_eur = 0.0
+
+    has_period = "DEB_PERIODE" in df.columns and "FIN_PERIODE" in df.columns
+    has_date_achat = "DATE_ACHAT" in df.columns
+
+    if has_period:
+        period_df = df.dropna(subset=["DEB_PERIODE", "FIN_PERIODE"]).copy()
+        if not period_df.empty:
+            overlap_mask = (period_df["DEB_PERIODE"] <= end) & (period_df["FIN_PERIODE"] >= start)
+            period_df = period_df.loc[overlap_mask].copy()
+
+            if not period_df.empty:
+                start_clip = period_df["DEB_PERIODE"].clip(lower=start)
+                end_clip = period_df["FIN_PERIODE"].clip(upper=end)
+                overlap_days = (end_clip - start_clip).dt.total_seconds().div(86400).clip(lower=0)
+                full_days = (period_df["FIN_PERIODE"] - period_df["DEB_PERIODE"]).dt.total_seconds().div(86400).clip(lower=1e-9)
+                prorata = overlap_days / full_days
+
+                period_vol = period_df["VOLUME_TOTAL_PERIODE"].fillna(0) * prorata
+                if "COUT_TOTAL_PERIODE" in period_df.columns:
+                    period_cost = period_df["COUT_TOTAL_PERIODE"].fillna(0) * prorata
+                else:
+                    period_cost = period_vol * period_df.get("PRIX_MOYEN", 0).fillna(0)
+
+                volume_mwh += period_vol.sum()
+                cost_eur += period_cost.sum()
+
+        if has_date_achat:
+            missing_period = df[df["DEB_PERIODE"].isna() | df["FIN_PERIODE"].isna()].copy()
+            if not missing_period.empty:
+                mask = (missing_period["DATE_ACHAT"] >= start) & (missing_period["DATE_ACHAT"] <= end)
+                subset = missing_period.loc[mask].copy()
+                if not subset.empty:
+                    add_vol = subset["VOLUME_TOTAL_PERIODE"].fillna(0)
+                    if "COUT_TOTAL_PERIODE" in subset.columns:
+                        add_cost = subset["COUT_TOTAL_PERIODE"].fillna(0)
+                    else:
+                        add_cost = add_vol * subset.get("PRIX_MOYEN", 0).fillna(0)
+                    volume_mwh += add_vol.sum()
+                    cost_eur += add_cost.sum()
+
+    elif has_date_achat:
+        subset = df[(df["DATE_ACHAT"] >= start) & (df["DATE_ACHAT"] <= end)].copy()
+        if not subset.empty:
+            add_vol = subset["VOLUME_TOTAL_PERIODE"].fillna(0)
+            if "COUT_TOTAL_PERIODE" in subset.columns:
+                add_cost = subset["COUT_TOTAL_PERIODE"].fillna(0)
+            else:
+                add_cost = add_vol * subset.get("PRIX_MOYEN", 0).fillna(0)
+            volume_mwh += add_vol.sum()
+            cost_eur += add_cost.sum()
+
+    volume_mwh = float(max(0.0, volume_mwh))
+    avg_price = float(cost_eur / volume_mwh) if volume_mwh > 0 else 0.0
+    return volume_mwh, avg_price
 
 
 @st.cache_data
@@ -1014,6 +1147,7 @@ def _plotly_layout(
         height=height,
         margin=dict(t=50, b=20, l=16, r=16),
         hovermode="x unified",
+        separators=". ",
         plot_bgcolor=plot_bg,
         paper_bgcolor=paper_bg,
         font=dict(color=font_col, family="Inter, -apple-system, sans-serif", size=12),
@@ -1281,6 +1415,285 @@ def fig_price_curve(monthly_prices: pd.DataFrame) -> go.Figure:
     fig.update_traces(line=dict(width=2.5), marker=dict(size=6, line=dict(width=1.5, color="#0B1120")))
     fig.update_layout(title=dict(font=dict(size=14, color=_title_color()), x=0))
     _plotly_layout(fig, height=340, x_grid=True, y_grid=True)
+    return fig
+
+
+def fig_simulation_purchase_comparison(
+    en_etat_achete_mwh: float,
+    en_etat_restant_mwh: float,
+    simule_achete_mwh: float,
+    simule_nouvel_achat_mwh: float,
+    simule_vendu_mwh: float,
+    simule_restant_mwh: float,
+    en_etat_cout_achete_eur: float,
+    en_etat_cout_restant_eur: float,
+    simule_cout_achete_eur: float,
+    simule_cout_nouvel_achat_eur: float,
+    simule_revenu_vente_eur: float,
+    simule_cout_restant_eur: float,
+) -> go.Figure:
+    """Graphique comparatif professionnel : En l'état vs Simulé (barres empilées)."""
+    c_orange = "#F59E0B"
+    c_green = "#22C55E"
+    c_gray = "#CBD5E1"
+    c_axis = "#334155"
+    c_bg = "#F6F7FB"
+
+    categories = ["En l'état", "Simulé"]
+    fig = go.Figure()
+
+    fig.add_trace(go.Bar(
+        x=categories,
+        y=[en_etat_achete_mwh, simule_achete_mwh],
+        name="Conso achetée (au prix moyen acheté)",
+        marker_color=c_orange,
+        width=0.52,
+        text=[f"{format_int_space(en_etat_cout_achete_eur)} €", f"{format_int_space(simule_cout_achete_eur)} €"],
+        textposition="inside",
+        textfont=dict(color="#111827", size=12),
+        hovertemplate="<b>%{x}</b><br>Conso achetée: %{y:,.0f} MWh<extra></extra>",
+    ))
+
+    fig.add_trace(go.Bar(
+        x=categories,
+        y=[0.0, simule_nouvel_achat_mwh],
+        name="Conso simulée (au prix simulé saisi)",
+        marker_color=c_green,
+        width=0.52,
+        text=["", f"{format_int_space(simule_cout_nouvel_achat_eur)} €"],
+        textposition="inside",
+        textfont=dict(color="#0F172A", size=12),
+        hovertemplate="<b>%{x}</b><br>Conso simulée: %{y:,.0f} MWh<extra></extra>",
+    ))
+
+    fig.add_trace(go.Bar(
+        x=categories,
+        y=[en_etat_restant_mwh, simule_restant_mwh],
+        name="Conso restante (au prix spot)",
+        marker_color=c_gray,
+        width=0.52,
+        text=[f"{format_int_space(en_etat_cout_restant_eur)} €", f"{format_int_space(simule_cout_restant_eur)} €"],
+        textposition="inside",
+        textfont=dict(color="#1F2937", size=12),
+        hovertemplate="<b>%{x}</b><br>Conso spot restante: %{y:,.0f} MWh<extra></extra>",
+    ))
+
+    total_en_etat_mwh = en_etat_achete_mwh + en_etat_restant_mwh
+    total_simule_mwh = simule_achete_mwh + simule_nouvel_achat_mwh + simule_restant_mwh
+    total_en_etat_eur = en_etat_cout_achete_eur + en_etat_cout_restant_eur
+    total_simule_eur = (
+        simule_cout_achete_eur
+        + simule_cout_nouvel_achat_eur
+        + simule_cout_restant_eur
+        - simule_revenu_vente_eur
+    )
+
+    _y_pad = max(1.0, max(total_en_etat_mwh, total_simule_mwh) * 0.08)
+    fig.add_annotation(
+        x="En l'état",
+        y=total_en_etat_mwh + _y_pad,
+        text=f"<b>Total : {format_int_space(total_en_etat_eur)} €</b>",
+        showarrow=False,
+        font=dict(size=13, color="#0F172A"),
+    )
+    fig.add_annotation(
+        x="Simulé",
+        y=total_simule_mwh + _y_pad,
+        text=f"<b>Total : {format_int_space(total_simule_eur)} €</b>",
+        showarrow=False,
+        font=dict(size=13, color="#0F172A"),
+    )
+
+    if simule_vendu_mwh > 0:
+        fig.add_trace(go.Scatter(
+            x=["Simulé"],
+            y=[total_simule_mwh],
+            mode="markers+text",
+            name="Vente simulée",
+            marker=dict(color="#8B5CF6", size=10, symbol="diamond"),
+            text=[f"Vente : {format_int_space(simule_vendu_mwh)} MWh · Revenu : {format_int_space(simule_revenu_vente_eur)} €"],
+            textposition="top center",
+            textfont=dict(color="#6D28D9", size=12),
+            hovertemplate="<b>Simulé</b><br>Volume vendu: %{customdata[0]:,.0f} MWh<br>Revenu: %{customdata[1]:,.0f} €<extra></extra>",
+            customdata=[[simule_vendu_mwh, simule_revenu_vente_eur]],
+        ))
+
+    fig.update_layout(
+        barmode="stack",
+        bargap=0.42,
+        barcornerradius=8,
+        separators=". ",
+        height=520,
+        margin=dict(t=48, r=24, b=50, l=70),
+        paper_bgcolor=c_bg,
+        plot_bgcolor=c_bg,
+        title=dict(text="Comparatif financier de couverture énergie", x=0, font=dict(size=14, color=_title_color())),
+        font=dict(family="Inter, -apple-system, sans-serif", size=12, color=c_axis),
+        xaxis=dict(
+            title="Scénarios comparés",
+            title_font=dict(size=13, color="#1E293B"),
+            tickfont=dict(size=13, color="#1E293B"),
+            showline=True,
+            linecolor="#94A3B8",
+        ),
+        yaxis=dict(
+            title="Consommation énergétique (MWh)",
+            title_font=dict(size=13, color="#1E293B"),
+            tickfont=dict(size=12, color="#334155"),
+            gridcolor="#E2E8F0",
+            zeroline=False,
+            rangemode="tozero",
+        ),
+        legend=dict(
+            orientation="h",
+            x=0.0,
+            y=1.04,
+            xanchor="left",
+            yanchor="bottom",
+            bgcolor="rgba(255,255,255,0.85)",
+            font=dict(size=11, color="#1E293B"),
+        ),
+    )
+    _plotly_layout(fig, height=520, x_grid=False, y_grid=True)
+    _y_top = max(total_en_etat_mwh, total_simule_mwh) + (_y_pad * 1.8)
+    fig.update_yaxes(range=[0, _y_top])
+    return fig
+
+
+def fig_current_state_yearly_bar(state_yearly_df: pd.DataFrame, current_year: int) -> go.Figure:
+    """Barres empilées de l'état actuel par année (acheté vs restant spot)."""
+    c_orange = "#F59E0B"
+    c_gray = "#CBD5E1"
+    c_axis = "#334155"
+    c_bg = "#F6F7FB"
+
+    fig = go.Figure()
+
+    if state_yearly_df.empty:
+        fig.update_layout(
+            title=dict(
+                text=f"État actuel par année (à partir de {current_year})",
+                font=dict(size=14, color=_title_color()),
+                x=0,
+            ),
+            height=520,
+        )
+        _plotly_layout(fig, height=520, x_grid=False, y_grid=True)
+        return fig
+
+    x_years = state_yearly_df["year"].astype(str).tolist()
+
+    fig.add_trace(go.Bar(
+        x=x_years,
+        y=state_yearly_df["achete_mwh"],
+        name="MWh achetés",
+        marker_color=c_orange,
+        width=0.52,
+        text=[f"{format_int_space(v)} €" for v in state_yearly_df["cout_achete_eur"]],
+        textposition="inside",
+        textfont=dict(color="#111827", size=11),
+        hovertemplate="<b>%{x}</b><br>MWh achetés: %{y:,.0f}<extra></extra>",
+    ))
+
+    fig.add_trace(go.Bar(
+        x=x_years,
+        y=state_yearly_df["restant_mwh"],
+        name="MWh restants (prix spot)",
+        marker_color=c_gray,
+        width=0.52,
+        text=[f"{format_int_space(v)} €" for v in state_yearly_df["cout_restant_eur"]],
+        textposition="inside",
+        textfont=dict(color="#1F2937", size=11),
+        hovertemplate="<b>%{x}</b><br>MWh restants spot: %{y:,.0f}<extra></extra>",
+    ))
+
+    for _, row in state_yearly_df.iterrows():
+        total_mwh = float(row["achete_mwh"] + row["restant_mwh"])
+        total_eur = float(row["cout_achete_eur"] + row["cout_restant_eur"])
+        y_pad = max(1.0, total_mwh * 0.06)
+        fig.add_annotation(
+            x=str(int(row["year"])),
+            y=total_mwh + y_pad,
+            text=f"<b>{format_int_space(total_eur)} €</b>",
+            showarrow=False,
+            font=dict(size=11, color="#0F172A"),
+        )
+
+    fig.update_layout(
+        barmode="stack",
+        bargap=0.42,
+        barcornerradius=8,
+        separators=". ",
+        height=520,
+        margin=dict(t=48, r=24, b=50, l=70),
+        paper_bgcolor=c_bg,
+        plot_bgcolor=c_bg,
+        title=dict(
+            text=f"État actuel par année (à partir de {current_year})",
+            font=dict(size=14, color=_title_color()),
+            x=0,
+        ),
+        font=dict(family="Inter, -apple-system, sans-serif", size=12, color=c_axis),
+        xaxis=dict(
+            title="Année",
+            title_font=dict(size=13, color="#1E293B"),
+            tickfont=dict(size=13, color="#1E293B"),
+            showline=True,
+            linecolor="#94A3B8",
+        ),
+        yaxis=dict(
+            title="Consommation énergétique (MWh)",
+            title_font=dict(size=13, color="#1E293B"),
+            tickfont=dict(size=12, color="#334155"),
+            gridcolor="#E2E8F0",
+            zeroline=False,
+            rangemode="tozero",
+        ),
+        legend=dict(
+            orientation="h",
+            x=0.0,
+            y=1.04,
+            xanchor="left",
+            yanchor="bottom",
+            bgcolor="rgba(255,255,255,0.85)",
+            font=dict(size=11, color="#1E293B"),
+        ),
+    )
+    _plotly_layout(fig, height=520, x_grid=False, y_grid=True)
+    return fig
+
+
+def fig_simulation_predicted_consumption(hourly_pred: pd.DataFrame, sim_type: str) -> go.Figure:
+    if hourly_pred.empty:
+        return go.Figure()
+
+    total_mwh = float(hourly_pred["energy_mwh"].sum())
+    start_ts = pd.to_datetime(hourly_pred["datetime"]).min()
+    end_ts = pd.to_datetime(hourly_pred["datetime"]).max()
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=["Période simulée"],
+        y=[total_mwh],
+        name="Conso prédite totale",
+        marker_color=_chart_palette()[1],
+        width=0.5,
+        text=[f"{format_int_space(total_mwh)} MWh"],
+        textposition="outside",
+        hovertemplate="<b>Période simulée</b><br>Conso prédite totale: %{y:,.2f} MWh<extra></extra>",
+    ))
+
+    period_label = f"{start_ts:%d/%m/%Y} → {end_ts:%d/%m/%Y}"
+    fig.update_layout(
+        title=dict(
+            text=f"Consommation prédite totale ({sim_type}) · {period_label}",
+            font=dict(size=14, color=_title_color()),
+            x=0,
+        ),
+        margin=dict(t=70, b=20, l=16, r=16),
+    )
+    _plotly_layout(fig, height=320, x_grid=False, y_grid=True, show_legend=False)
+    fig.update_yaxes(title="MWh")
     return fig
 
 
@@ -1764,9 +2177,9 @@ _this_year = pd.Timestamp.now().year
 _last_year = _this_year - 1
 _VOL_ACHETE_MWH = purchased_volume_mwh_for_year(load_achats(), _this_year)
 
-# Consommation année en cours et N-1 depuis all_years_total (toute la plage, sans filtre période)
-_conso_this_yr = all_years_total[all_years_total["datetime"].dt.year == _this_year]["puissance_kw"].sum()
-_conso_last_yr = all_years_total[all_years_total["datetime"].dt.year == _last_year]["puissance_kw"].sum()
+# Consommation année en cours et N-1 depuis all_years_total (MWh, calcul énergétique cohérent)
+_conso_this_yr = consumption_mwh_for_year(all_years_total, _this_year)
+_conso_last_yr = consumption_mwh_for_year(all_years_total, _last_year)
 _conso_delta_pct = (_conso_this_yr - _conso_last_yr) / _conso_last_yr * 100 if _conso_last_yr > 0 else None
 
 if _conso_delta_pct is not None:
@@ -1785,20 +2198,20 @@ if multi_site:
         st.markdown(f"""
         <div class="kpi-card">
             <div class="kpi-label">Conso totale {_this_year}</div>
-            <div class="kpi-value">{_conso_this_yr/1000:,.0f} MWh</div>
+            <div class="kpi-value">{format_int_space(_conso_this_yr)} MWh</div>
             {_d_html}
         </div>""", unsafe_allow_html=True)
     with kc2:
         st.markdown(f"""
-        <div class="kpi-card kpi-teal">
-            <div class="kpi-label">Derni\u00e8re mesure</div>
-            <div class="kpi-value">{_last_hist_str}</div>
+        <div class="kpi-card kpi-amber">
+            <div class="kpi-label">Puissance achet\u00e9e {_this_year}</div>
+            <div class="kpi-value">{format_int_space(_VOL_ACHETE_MWH)} MWh</div>
         </div>""", unsafe_allow_html=True)
     with kc3:
         st.markdown(f"""
-        <div class="kpi-card kpi-amber">
-            <div class="kpi-label">Puissance achet\u00e9e {_this_year}</div>
-            <div class="kpi-value">{_VOL_ACHETE_MWH:,.0f} MWh</div>
+        <div class="kpi-card kpi-teal">
+            <div class="kpi-label">Derni\u00e8re mesure</div>
+            <div class="kpi-value">{_last_hist_str}</div>
         </div>""", unsafe_allow_html=True)
     with kc4:
         st.markdown(f"""
@@ -1810,146 +2223,237 @@ if multi_site:
     st.markdown("<div style='margin-bottom:1.8rem'></div>", unsafe_allow_html=True)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# BANDEAU RÉ-ENTRAÎNEMENT (admin + site unique sélectionné)
-# ══════════════════════════════════════════════════════════════════════════════
-
-_show_retrain    = current_role == "admin" and not multi_site
-chosen_prm       = preds_df.loc[preds_df["site_label"] == selected_sites[0], "prm"].iloc[0] if not multi_site else None
+# Identifiants du site sélectionné (utilisés pour la section « À propos du modèle »)
+chosen_prm        = preds_df.loc[preds_df["site_label"] == selected_sites[0], "prm"].iloc[0] if not multi_site else None
 chosen_train_site = selected_sites[0] if not multi_site else None
-
-if _show_retrain and chosen_prm:
-    _already_trained = (
-        st.session_state.training_new_metrics is not None
-        and st.session_state.training_prm == chosen_prm
-        and not st.session_state.training_accepted
-    )
-    _b_text, _b_btn = st.columns([4, 1])
-    with _b_text:
-        st.markdown(
-            f"<div style='font-size:2rem;font-weight:700;text-transform:uppercase;"
-            f"letter-spacing:0.12em;color:var(--secondary);margin-bottom:0.2rem'>"
-            f"{chosen_train_site}</div>"
-            f"<div style='font-size:0.88rem;color:var(--muted)'>"
-            f"D\u00e9clenchez un r\u00e9-entra\u00eenement pour mettre \u00e0 jour les pr\u00e9dictions. "
-            f"<b>Dur\u00e9e : quelques minutes.</b></div>",
-            unsafe_allow_html=True,
-        )
-    with _b_btn:
-        _launch = st.button(
-            "🔄 Ré-entraîner le modèle" if not _already_trained else "✅ Entraînement terminé",
-            use_container_width=True,
-            type="primary",
-            disabled=_already_trained,
-            key="btn_retrain_top",
-        )
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    if _launch:
-        st.session_state.training_prm         = chosen_prm
-        st.session_state.training_old_metrics = load_mlflow_metrics(chosen_prm)
-        st.session_state.training_new_metrics = None
-        st.session_state.training_accepted    = False
-        st.warning("⏳ Entraînement lancé. Cette opération peut prendre **5 à 30 minutes** selon la taille des données. Veuillez ne pas fermer la page.", icon="⚠️")
-        with st.spinner(f"Entraînement en cours pour {chosen_train_site}… Merci de patienter."):
-            new_metrics = simulate_training(chosen_prm, st.session_state.training_old_metrics)
-        st.session_state.training_new_metrics = new_metrics
-        st.rerun()
-
-    # Affichage des métriques comparées après entraînement
-    if st.session_state.training_new_metrics is not None and st.session_state.training_old_metrics is not None:
-        with st.expander("📊 Comparaison des métriques - Ancien vs Nouveau modèle", expanded=True):
-            old_m = st.session_state.training_old_metrics
-            new_m = st.session_state.training_new_metrics
-
-            metrics_display = {
-                "RMSE": ("val_rmse", "lower is better"),
-                "MAE": ("val_mae", "lower is better"),
-                "MAPE": ("val_mape", "lower is better"),
-                "R² Score": ("val_r2", "higher is better"),
-            }
-
-            cols = st.columns(4)
-            for idx, (label, (key, desc)) in enumerate(metrics_display.items()):
-                with cols[idx]:
-                    old_val = old_m.get(key, None)
-                    new_val = new_m.get(key, None)
-
-                    if old_val is not None and new_val is not None:
-                        # Calcul du changement
-                        if key == "val_r2":
-                            # R² plus haut est mieux
-                            change_pct = ((new_val - old_val) / abs(old_val) * 100) if old_val != 0 else 0
-                            improved = new_val > old_val
-                        else:
-                            # MAE, RMSE, MAPE plus bas est mieux
-                            change_pct = ((old_val - new_val) / old_val * 100) if old_val != 0 else 0
-                            improved = new_val < old_val
-
-                        # Affichage
-                        color = "🟢" if improved else "🔴"
-                        arrow = "↓" if key != "val_r2" else "↑"
-
-                        _improve_txt = "Amélioration" if improved else "Dégradation"
-                        st.markdown(
-                            f"<div style='background:var(--primary-bg);padding:1rem;border-radius:12px;border:1px solid var(--border);'>"
-                            f"<div style='font-size:0.75rem;color:var(--muted);margin-bottom:0.5rem;text-transform:uppercase;letter-spacing:0.08em;font-weight:600'>{label}</div>"
-                            f"<div style='display:flex;gap:0.5rem;align-items:baseline;margin-bottom:0.5rem'>"
-                            f"<span style='font-size:0.92rem;color:var(--text)'>Ancien: <b>{old_val:.4f}</b></span>"
-                            f"<span style='font-size:0.85rem;color:var(--muted)'>&rarr;</span>"
-                            f"<span style='font-size:0.92rem;color:var(--text)'>Nouveau: <b>{new_val:.4f}</b></span>"
-                            f"</div>"
-                            f"<div style='font-size:0.85rem'>{color} {arrow} {abs(change_pct):.1f}% {_improve_txt}</div>"
-                            f"</div>",
-                            unsafe_allow_html=True,
-                        )
-                    else:
-                        st.markdown(
-                            f"<div style='background:var(--primary-bg);padding:1rem;border-radius:12px;border:1px solid var(--border);'>"
-                            f"<div style='font-size:0.75rem;color:var(--muted);margin-bottom:0.5rem;text-transform:uppercase;letter-spacing:0.08em;font-weight:600'>{label}</div>"
-                            "<div style='color:var(--muted);font-size:0.85rem'>Données indisponibles</div>"
-                            "</div>",
-                            unsafe_allow_html=True,
-                        )
-
-            # Bouton pour accepter le nouveau modèle
-            st.divider()
-            _accept_col, _reject_col = st.columns(2)
-            with _accept_col:
-                if st.button("✅ Accepter le nouveau modèle", use_container_width=True, type="primary"):
-                    st.session_state.training_accepted = True
-                    st.success("✅ Nouveau modèle accepté et activé pour ce site !")
-                    st.rerun()
-            with _reject_col:
-                if st.button("❌ Rejeter et conserver l'ancien", use_container_width=True):
-                    st.session_state.training_new_metrics = None
-                    st.session_state.training_old_metrics = None
-                    st.info("Ancien modèle conservé")
-                    st.rerun()
 
 
 # Répartition par site EN PREMIER, puis courbe, puis totaux annuels, puis barres par site
 if multi_site:
     _pc1, _pc2, _pc3 = st.columns([1, 2, 1])
     with _pc2:
-        st.plotly_chart(fig_pie(filtered), use_container_width=True)
-    st.plotly_chart(fig_consumption_curve(filtered, aggregate=True), use_container_width=True)
-    st.plotly_chart(fig_annual_total_bar(all_years_total), use_container_width=True)
-    st.plotly_chart(fig_yearly_bar(all_years_total), use_container_width=True)
+        st.plotly_chart(fig_pie(filtered), use_container_width=True,
+            key="chart_pie_1",
+        )
+    st.plotly_chart(fig_consumption_curve(filtered, aggregate=True), use_container_width=True,
+            key="chart_consumption_curve_1",
+        )
+    st.plotly_chart(fig_annual_total_bar(all_years_total), use_container_width=True,
+            key="chart_annual_total_bar_1",
+        )
+    st.plotly_chart(fig_yearly_bar(all_years_total), use_container_width=True,
+            key="chart_yearly_bar_1",
+        )
 else:
-    st.plotly_chart(fig_consumption_curve(filtered, aggregate=False), use_container_width=True)
-    st.plotly_chart(fig_annual_total_bar(all_years_total), use_container_width=True)
+    st.plotly_chart(fig_consumption_curve(filtered, aggregate=False), use_container_width=True,
+            key="chart_consumption_curve_2",
+        )
+    st.plotly_chart(fig_annual_total_bar(all_years_total), use_container_width=True,
+            key="chart_annual_total_bar_2",
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# SECTION « À PROPOS DU MODÈLE » — visible uniquement si un site (PRM) est sélectionné.
+# Chaque site industriel possède son propre modèle entraîné sur ses données historiques.
+# Le réentraînement est réservé aux administrateurs.
+# ══════════════════════════════════════════════════════════════════════════════
+
+if not multi_site and chosen_prm:
+    st.markdown("---")
+    st.markdown("""
+    <div class=\"section-block\">
+        <div class=\"section-heading\">
+            <h2>\U0001f9e0 À propos du modèle</h2>
+            <span class=\"section-desc\">
+                Métriques de performance du modèle de prédiction associé à ce site (PRM).<br>
+                Chaque site industriel possède son propre modèle entraîné sur ses données historiques.
+            </span>
+        </div>
+    </div>""", unsafe_allow_html=True)
+
+    # ── Métriques actuelles ────────────────────────────────────────────────
+    _current_metrics = load_mlflow_metrics(chosen_prm)
+
+    _metrics_labels = {
+        "val_rmse": ("RMSE",     "Erreur quadratique moyenne",   "↓ plus bas = mieux"),
+        "val_mae":  ("MAE",      "Erreur absolue moyenne",       "↓ plus bas = mieux"),
+        "val_mape": ("MAPE",     "Erreur en pourcentage",        "↓ plus bas = mieux"),
+        "val_r2":   ("R² Score", "Coefficient de détermination", "↑ plus haut = mieux"),
+    }
+
+    if _current_metrics:
+        _m_cols = st.columns(4)
+        for _mi, (mkey, (mlabel, mdesc, mhint)) in enumerate(_metrics_labels.items()):
+            with _m_cols[_mi]:
+                mval = _current_metrics.get(mkey)
+                _mval_str   = f"{mval:.4f}" if mval is not None else "—"
+                _mval_color = "var(--text)" if mval is not None else "var(--muted)"
+                st.markdown(
+                    f"<div style='background:var(--primary-bg);padding:1rem 1.2rem;"
+                    f"border-radius:12px;border:1px solid var(--border);height:100%'>"
+                    f"<div style='font-size:0.72rem;color:var(--muted);text-transform:uppercase;"
+                    f"letter-spacing:0.08em;font-weight:600;margin-bottom:0.4rem'>{mlabel}</div>"
+                    f"<div style='font-size:1.45rem;font-weight:700;color:{_mval_color};"
+                    f"margin-bottom:0.2rem'>{_mval_str}</div>"
+                    f"<div style='font-size:0.75rem;color:var(--muted)'>{mdesc}</div>"
+                    f"<div style='font-size:0.72rem;color:#94A3B8;margin-top:0.3rem'>{mhint}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+    else:
+        st.markdown(
+            "<div class='info-subtle'>⚠️ Aucune métrique MLflow disponible pour ce site. "
+            "Lancez un premier entraînement pour générer les métriques.</div>",
+            unsafe_allow_html=True,
+        )
+
+    # ── Réentraînement (administrateurs uniquement) ───────────────────────
+    st.markdown("<div style='margin-top:1.5rem'></div>", unsafe_allow_html=True)
+
+    if current_role == "admin":
+        _already_trained = (
+            st.session_state.training_new_metrics is not None
+            and st.session_state.training_prm == chosen_prm
+            and not st.session_state.training_accepted
+        )
+
+        with st.expander("🔄 Réentraîner le modèle", expanded=False):
+            st.markdown(
+                f"<div style='font-size:0.92rem;color:var(--muted);margin-bottom:1rem'>"
+                f"Vous êtes connecté en tant qu'<b>administrateur</b>. "
+                f"Le réentraînement met à jour le modèle de prédiction du site "
+                f"<b>{chosen_train_site}</b> à partir de ses données historiques les plus récentes."
+                f"<br><b>⚠️ Cette opération peut nécessiter plusieurs minutes de calcul.</b>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+            _launch = st.button(
+                "🔄 Lancer le réentraînement" if not _already_trained else "✅ Réentraînement terminé",
+                use_container_width=True,
+                type="primary",
+                disabled=_already_trained,
+                key="btn_retrain_model_section",
+            )
+
+            if _launch:
+                st.session_state.training_prm         = chosen_prm
+                st.session_state.training_old_metrics = load_mlflow_metrics(chosen_prm)
+                st.session_state.training_new_metrics = None
+                st.session_state.training_accepted    = False
+                st.warning(
+                    "⏳ Entraînement lancé. Cette opération peut prendre **5 à 30 minutes** "
+                    "selon la taille des données. Veuillez ne pas fermer la page.",
+                    icon="⚠️",
+                )
+                with st.spinner(f"Entraînement en cours pour {chosen_train_site}… Merci de patienter."):
+                    new_metrics = simulate_training(chosen_prm, st.session_state.training_old_metrics)
+                st.session_state.training_new_metrics = new_metrics
+                st.rerun()
+
+            # ── Comparaison ancien / nouveau modèle ───────────────────────
+            if (
+                st.session_state.training_new_metrics is not None
+                and st.session_state.training_prm == chosen_prm
+                and not st.session_state.training_accepted
+            ):
+                st.markdown("<div style='margin-top:1rem'></div>", unsafe_allow_html=True)
+                st.markdown(
+                    "<div style='font-weight:600;font-size:1rem;margin-bottom:0.8rem'>"
+                    "📊 Comparaison des métriques — Modèle actuel vs Nouveau modèle"
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
+                old_m = st.session_state.training_old_metrics
+                new_m = st.session_state.training_new_metrics
+
+                _cmp_cols = st.columns(4)
+                for _ci, (mkey, (mlabel, _mdesc, _mhint)) in enumerate(_metrics_labels.items()):
+                    with _cmp_cols[_ci]:
+                        old_val = old_m.get(mkey) if old_m else None
+                        new_val = new_m.get(mkey) if new_m else None
+                        if new_val is not None:
+                            if old_val is not None:
+                                if mkey == "val_r2":
+                                    change_pct = ((new_val - old_val) / abs(old_val) * 100) if old_val != 0 else 0
+                                    improved = new_val > old_val
+                                else:
+                                    change_pct = ((old_val - new_val) / old_val * 100) if old_val != 0 else 0
+                                    improved = new_val < old_val
+                                badge_color = "#22C55E" if improved else "#EF4444"
+                                badge_icon  = "🟢" if improved else "🔴"
+                                arrow       = "↓" if mkey != "val_r2" else "↑"
+                                improve_txt = "Amélioration" if improved else "Dégradation"
+                                st.markdown(
+                                    f"<div style='background:var(--primary-bg);padding:1rem;border-radius:12px;"
+                                    f"border:2px solid {badge_color}33;'>"
+                                    f"<div style='font-size:0.72rem;color:var(--muted);text-transform:uppercase;"
+                                    f"letter-spacing:0.08em;font-weight:600;margin-bottom:0.5rem'>{mlabel}</div>"
+                                    f"<div style='font-size:0.85rem;color:var(--muted);margin-bottom:0.2rem'>"
+                                    f"Actuel : <b style='color:var(--text)'>{old_val:.4f}</b></div>"
+                                    f"<div style='font-size:0.85rem;color:var(--muted);margin-bottom:0.5rem'>"
+                                    f"Nouveau : <b style='color:var(--text)'>{new_val:.4f}</b></div>"
+                                    f"<div style='font-size:0.82rem'>{badge_icon} {arrow} {abs(change_pct):.1f}% {improve_txt}</div>"
+                                    f"</div>",
+                                    unsafe_allow_html=True,
+                                )
+                            else:
+                                st.markdown(
+                                    f"<div style='background:var(--primary-bg);padding:1rem;border-radius:12px;"
+                                    f"border:1px solid var(--border);'>"
+                                    f"<div style='font-size:0.72rem;color:var(--muted);text-transform:uppercase;"
+                                    f"letter-spacing:0.08em;font-weight:600;margin-bottom:0.5rem'>{mlabel}</div>"
+                                    f"<div style='font-size:1.1rem;font-weight:700'>{new_val:.4f}</div>"
+                                    f"<div style='font-size:0.75rem;color:var(--muted);margin-top:0.3rem'>Premier entraînement</div>"
+                                    f"</div>",
+                                    unsafe_allow_html=True,
+                                )
+                        else:
+                            st.markdown(
+                                f"<div style='background:var(--primary-bg);padding:1rem;border-radius:12px;"
+                                f"border:1px solid var(--border);'>"
+                                f"<div style='font-size:0.72rem;color:var(--muted);text-transform:uppercase;"
+                                f"letter-spacing:0.08em;font-weight:600;margin-bottom:0.5rem'>{mlabel}</div>"
+                                f"<div style='color:var(--muted);font-size:0.85rem'>Non disponible</div>"
+                                f"</div>",
+                                unsafe_allow_html=True,
+                            )
+
+                st.divider()
+                _accept_col, _reject_col = st.columns(2)
+                with _accept_col:
+                    if st.button("✅ Enregistrer le nouveau modèle", use_container_width=True, type="primary"):
+                        st.session_state.training_accepted = True
+                        _mlops_logger.info(f"MODÈLE ACCEPTÉ | PRM={chosen_prm} | métriques={new_m}")
+                        st.success("✅ Nouveau modèle enregistré et activé pour ce site !")
+                        st.rerun()
+                with _reject_col:
+                    if st.button("🔒 Conserver le modèle actuel", use_container_width=True):
+                        st.session_state.training_new_metrics = None
+                        st.session_state.training_old_metrics = None
+                        _mlops_logger.info(f"MODÈLE CONSERVÉ (rejeté) | PRM={chosen_prm}")
+                        st.info("Modèle actuel conservé. Aucune modification appliquée.")
+                        st.rerun()
+    else:
+        # Utilisateur non-admin : mention informative
+        st.markdown(
+            "<div class='info-subtle' style='margin-top:0.5rem'>🔒 Le réentraînement du modèle est "
+            "réservé aux <b>administrateurs</b> afin de garantir la stabilité du système de prédiction.</div>",
+            unsafe_allow_html=True,
+        )
+
+
+
 # SECTION 2 - PRIX SPOT
 # ══════════════════════════════════════════════════════════════════════════════
 
 if multi_site:
+    st.markdown("---")
     st.markdown("""
     <div class="section-block">
         <div class="section-heading">
-            <h2>💶 Prix futur</h2>
+            <h2>Prix futur</h2>
             <span class="section-desc">Évolution mensuelle Base et Peak sur la période sélectionnée</span>
         </div>
     </div>""", unsafe_allow_html=True)
@@ -1957,7 +2461,7 @@ if multi_site:
     if prices_df.empty:
         st.markdown('<div class="info-subtle">⚠️ Aucune donnée de prix disponible.</div>', unsafe_allow_html=True)
     else:
-        price_priority = ["mensuel", "trimestriel", "annuel"]
+        price_priority = ["horaire", "mensuel", "trimestriel", "annuel"]
         monthly_prices = build_monthly_price_series(
             prices_df, pd.to_datetime(start_date), pd.to_datetime(end_date), price_priority
         )
@@ -1965,40 +2469,145 @@ if multi_site:
             monthly_prices["month"].dt.year.isin(selected_years)
         ].copy()
         if not monthly_prices.empty:
-            st.plotly_chart(fig_price_curve(monthly_prices), use_container_width=True)
+            st.plotly_chart(fig_price_curve(monthly_prices), use_container_width=True,
+            key="chart_price_curve_1",
+        )
         else:
             st.markdown('<div class="info-subtle">Aucun prix sur la plage sélectionnée.</div>', unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# SECTION 3 - SIMULATION ACHAT (refonte complète, calcul horaire)
+# SECTION 3 - SIMULATION ACHAT ÉNERGIE (interface métier simplifiée)
 # ══════════════════════════════════════════════════════════════════════════════
 
-# Import du moteur de simulation
-import sys as _sys
-_sys.path.insert(0, str(BASE_DIR))
-from src.simulation_engine import (
-    SimulatedPurchase,
-    expand_portfolio_hourly,
-    expand_purchase_hourly,
-    build_hourly_index,
-    run_simulation,
-)
+# ── Helpers simulation simplifiée ─────────────────────────────────────────────
 
-# Typologies d'achats prédéfinies (raccourcis)
-_PRODUCT_TYPES = {
-    "BaseLoad":  {"hour_start": 0,  "hour_end": 24, "days": "all",      "desc": "24h/24, 7j/7"},
-    "Peakload":  {"hour_start": 8,  "hour_end": 20, "days": "business", "desc": "8h–20h, jours ouvrés"},
-    "OffPeak":   {"hour_start": 0,  "hour_end": 24, "days": "all",      "desc": "Heures hors Peakload"},
-    "Bloc custom": {"hour_start": 0, "hour_end": 24, "days": "all",     "desc": "Plage libre"},
-}
+def _sim_spot_moyen(prices_df, start, end):
+    """Prix spot moyen (€/MWh Base) sur la période — préfère les lignes horaires."""
+    if prices_df.empty:
+        return 0.0
+    # Priorité : horaire > mensuel > trimestriel > annuel
+    for _type in ["horaire", "mensuel", "trimestriel", "annuel"]:
+        mask = (
+            (prices_df["type"] == _type) &
+            (prices_df["date_deb"] <= end) &
+            (prices_df["date_fin"] >= start)
+        )
+        subset = prices_df.loc[mask]
+        if not subset.empty:
+            return float(subset["prix_base"].mean())
+    return 55.0
+
+
+def _sim_conso_horaire(filtered_total, start, end):
+    """
+    Retourne un DataFrame horaire avec colonnes [datetime, energy_mwh]
+    calculé depuis filtered_total sur la période [start, end].
+    """
+    if filtered_total.empty:
+        return pd.DataFrame(columns=["datetime", "energy_mwh"])
+    col_kw = next((c for c in ["puissance_kw", "puissance_moy_heure"] if c in filtered_total.columns), None)
+    if col_kw is None:
+        return pd.DataFrame(columns=["datetime", "energy_mwh"])
+    mask = (filtered_total["datetime"] >= start) & (filtered_total["datetime"] <= end)
+    group_col = next((c for c in ["prm", "site_label"] if c in filtered_total.columns), None)
+    cols = ["datetime", col_kw] + ([group_col] if group_col else [])
+    df = filtered_total.loc[mask, cols].copy()
+    if df.empty:
+        return pd.DataFrame(columns=["datetime", "energy_mwh"])
+
+    # Intervalle réel entre mesures (en heures), calculé par site/PRM
+    if group_col:
+        df = df.sort_values([group_col, "datetime"]).copy()
+        _delta_h = (
+            df.groupby(group_col)["datetime"]
+            .diff()
+            .dt.total_seconds()
+            .div(3600)
+        )
+        _median_h = _delta_h.groupby(df[group_col]).transform("median")
+        df["interval_h"] = _delta_h.fillna(_median_h).fillna(1.0)
+    else:
+        df = df.sort_values("datetime").copy()
+        _delta_h = df["datetime"].diff().dt.total_seconds().div(3600)
+        _median_h = _delta_h.median()
+        df["interval_h"] = _delta_h.fillna(_median_h).fillna(1.0)
+
+    df["interval_h"] = df["interval_h"].clip(lower=1/60, upper=24)
+    df["energy_mwh"] = df[col_kw] * df["interval_h"] / 1000.0
+    # Arrondi à l'heure pour le join prix
+    df["datetime_h"] = df["datetime"].dt.floor("h")
+    hourly = df.groupby("datetime_h", as_index=False)["energy_mwh"].sum()
+    return hourly.rename(columns={"datetime_h": "datetime"})
+
+
+def _sim_prix_horaire(prices_df, hourly_df, price_col="prix_base"):
+    """
+    Joint le prix spot précis à chaque heure de hourly_df.
+    Priorité : horaire > mensuel > trimestriel > annuel.
+    """
+    if prices_df.empty or hourly_df.empty:
+        hourly_df = hourly_df.copy()
+        hourly_df["prix_spot"] = 55.0
+        return hourly_df
+    priority = ["horaire", "mensuel", "trimestriel", "annuel"]
+    prix_series = price_for_datetimes(
+        hourly_df["datetime"].reset_index(drop=True),
+        prices_df, price_col, priority
+    )
+    hourly_df = hourly_df.copy()
+    hourly_df["prix_spot"] = prix_series.values
+    hourly_df["prix_spot"] = hourly_df["prix_spot"].fillna(55.0)
+    return hourly_df
+
+
+def _sim_is_peak_slot(datetimes: pd.Series) -> pd.Series:
+    """Créneau Peak : lundi à vendredi, de 08:00 (inclus) à 20:00 (exclu)."""
+    _dt = pd.to_datetime(datetimes)
+    return (_dt.dt.weekday < 5) & (_dt.dt.hour >= 8) & (_dt.dt.hour < 20)
+
+
+def _sim_prix_horaire_selon_type(prices_df, hourly_df, sim_type: str):
+    """
+    Applique le prix horaire selon le type d'achat simulé.
+    - Base : prix_base sur toutes les heures
+    - Peak : prix_peak en créneau Peak, sinon prix_base
+    """
+    if hourly_df.empty:
+        hourly_df = hourly_df.copy()
+        hourly_df["prix_spot"] = 55.0
+        hourly_df["is_peak_slot"] = False
+        return hourly_df
+
+    if sim_type != "Peak":
+        out = _sim_prix_horaire(prices_df, hourly_df, price_col="prix_base")
+        out["is_peak_slot"] = False
+        return out
+
+    _base = _sim_prix_horaire(prices_df, hourly_df, price_col="prix_base")
+    _peak = _sim_prix_horaire(prices_df, hourly_df, price_col="prix_peak")
+    _mask_peak = _sim_is_peak_slot(hourly_df["datetime"])
+
+    out = hourly_df.copy()
+    out["is_peak_slot"] = _mask_peak.values
+    out["prix_spot"] = np.where(_mask_peak.values, _peak["prix_spot"].values, _base["prix_spot"].values)
+    return out
+
+
+def _sim_conso_mwh(filtered_total, start, end):
+    """Consommation totale (MWh) sur la période — conservé pour compatibilité."""
+    h = _sim_conso_horaire(filtered_total, start, end)
+    return float(h["energy_mwh"].sum()) if not h.empty else 0.0
+
 
 if multi_site:
+    # ── En-tête de section ──────────────────────────────────────────────────
+    st.markdown("---")
     st.markdown("""
 <div class="section-block">
     <div class="section-heading">
-        <h2>🧮 Simulation achat à terme</h2>
-        <span class="section-desc">Testez l'impact d'un ou plusieurs achats envisagés sur votre coût d'approvisionnement</span>
+        <h2>Simulation achat énergie</h2>
+        <span class="section-desc">Estimez rapidement l'impact d'un achat sur votre coût d'approvisionnement</span>
     </div>
 </div>""", unsafe_allow_html=True)
 
@@ -2006,586 +2615,448 @@ if multi_site:
         st.markdown('<div class="info-subtle">🔒 Réservé aux administrateurs.</div>', unsafe_allow_html=True)
     elif not all_sites_selected:
         st.markdown('<div class="info-subtle">ℹ️ Sélectionnez « Tous les sites » pour accéder à la simulation.</div>', unsafe_allow_html=True)
-    elif prices_df.empty:
-        st.markdown('<div class="info-subtle">⚠️ Simulation impossible sans données de prix.</div>', unsafe_allow_html=True)
     else:
-        # ══════════════════════════════════════════════════════════════
-        # 1. SÉLECTION DE LA PÉRIODE
-        # ══════════════════════════════════════════════════════════════
-        st.markdown("### 📅 Période de simulation")
+        _sim_source_df = all_years_total.copy() if not all_years_total.empty else filtered_total.copy()
 
-        # Années disponibles dans les données
-        _all_data = pd.concat([
-            filtered_total[["datetime"]],
-            preds_df[["datetime"]],
-        ], ignore_index=True)
-        _available_years = sorted(_all_data["datetime"].dt.year.unique())
-
-        _period_col1, _period_col2 = st.columns([1, 2])
-        with _period_col1:
-            _period_mode = st.radio(
-                "Mode période",
-                ["Année entière", "Plage personnalisée"],
-                horizontal=True,
-                key="sim_period_mode",
-            )
-        with _period_col2:
-            if _period_mode == "Année entière":
-                _sim_year = st.selectbox(
-                    "Année", options=_available_years,
-                    index=min(len(_available_years)-1, 2),
-                    key="sim_year_select",
-                )
-                _sim_start = pd.Timestamp(f"{_sim_year}-01-01")
-                _sim_end = pd.Timestamp(f"{_sim_year}-12-31 23:00:00")
-            else:
-                _pc1, _pc2 = st.columns(2)
-                with _pc1:
-                    _sim_start = pd.Timestamp(st.date_input(
-                        "Début", value=pd.Timestamp("2027-01-01"),
-                        key="sim_date_start",
-                    ))
-                with _pc2:
-                    _sim_end = pd.Timestamp(st.date_input(
-                        "Fin", value=pd.Timestamp("2027-12-31"),
-                        key="sim_date_end",
-                    )) + pd.Timedelta(hours=23)
-
-        _sim_period_label = (
-            f"{_sim_start.strftime('%d/%m/%Y')} → {_sim_end.strftime('%d/%m/%Y')}"
-        )
-        st.caption(f"Période : **{_sim_period_label}**")
-
-        # ══════════════════════════════════════════════════════════════
-        # 2. SAISIE DES ACHATS SIMULÉS (dynamique)
-        # ══════════════════════════════════════════════════════════════
-        st.markdown("### ⚙️ Achats à terme envisagés")
-
-        # Gestion du nombre de lignes d'achats dans session_state
-        if "sim_purchase_count" not in st.session_state:
-            st.session_state.sim_purchase_count = 1
-
-        _add_col, _reset_col, _ = st.columns([1, 1, 3])
-        with _add_col:
-            if st.button("➕ Ajouter un achat", key="sim_add_purchase"):
-                st.session_state.sim_purchase_count += 1
-                st.rerun()
-        with _reset_col:
-            if st.button("🗑️ Réinitialiser", key="sim_reset_purchases"):
-                st.session_state.sim_purchase_count = 1
-                st.rerun()
-
-        # Collecte des achats simulés
-        _sim_purchases: list[SimulatedPurchase] = []
-        _n_purchases = st.session_state.sim_purchase_count
-
-        for i in range(_n_purchases):
-            with st.container():
-                st.markdown(f"**Achat #{i+1}**")
-                _c1, _c2, _c3, _c4, _c5 = st.columns([1.5, 1, 1, 1, 1.5])
-
-                with _c1:
-                    _product = st.selectbox(
-                        "Produit", options=list(_PRODUCT_TYPES.keys()),
-                        key=f"sim_product_{i}",
-                        help=", ".join(
-                            f"{k}: {v['desc']}" for k, v in _PRODUCT_TYPES.items()
-                        ),
-                    )
-                with _c2:
-                    _direction = st.radio(
-                        "Sens", ["Achat", "Vente"],
-                        horizontal=True, key=f"sim_dir_{i}",
-                    )
-                with _c3:
-                    _volume = st.number_input(
-                        "Volume (MW)", min_value=0.0, value=1.0,
-                        step=0.5, format="%.1f", key=f"sim_vol_{i}",
-                    )
-                with _c4:
-                    _price = st.number_input(
-                        "Prix (€/MWh)", min_value=0.0, value=52.5,
-                        step=0.5, format="%.2f", key=f"sim_prix_{i}",
-                    )
-                with _c5:
-                    _ptype = _PRODUCT_TYPES[_product]
-                    if _product == "Bloc custom":
-                        _hc1, _hc2 = st.columns(2)
-                        with _hc1:
-                            _h_start = st.number_input(
-                                "Heure début", 0, 23, 0, key=f"sim_hstart_{i}")
-                        with _hc2:
-                            _h_end = st.number_input(
-                                "Heure fin", 1, 24, 24, key=f"sim_hend_{i}")
-                        _days = st.selectbox(
-                            "Jours", ["all", "business", "weekend"],
-                            format_func=lambda x: {
-                                "all": "Tous les jours",
-                                "business": "Jours ouvrés",
-                                "weekend": "Week-end"
-                            }[x],
-                            key=f"sim_days_{i}",
-                        )
-                    elif _product == "OffPeak":
-                        # OffPeak = tout sauf peak (géré dans le moteur comme inversion)
-                        _h_start = 0
-                        _h_end = 24
-                        _days = "all"
-                        st.caption("Heures hors Peakload")
-                    else:
-                        _h_start = _ptype["hour_start"]
-                        _h_end = _ptype["hour_end"]
-                        _days = _ptype["days"]
-                        st.caption(_ptype["desc"])
-
-                if _volume > 0:
-                    if _product == "OffPeak":
-                        # OffPeak = deux blocs : nuit tous jours + journée we
-                        # Nuit : 0h–8h et 20h–24h tous les jours
-                        _sim_purchases.append(SimulatedPurchase(
-                            label=f"OffPeak #{i+1} (nuit)",
-                            direction=_direction,
-                            volume_mw=_volume,
-                            price_eur_mwh=_price,
-                            hour_start=0, hour_end=8,
-                            days="all",
-                        ))
-                        _sim_purchases.append(SimulatedPurchase(
-                            label=f"OffPeak #{i+1} (soir)",
-                            direction=_direction,
-                            volume_mw=_volume,
-                            price_eur_mwh=_price,
-                            hour_start=20, hour_end=24,
-                            days="all",
-                        ))
-                        _sim_purchases.append(SimulatedPurchase(
-                            label=f"OffPeak #{i+1} (we jour)",
-                            direction=_direction,
-                            volume_mw=_volume,
-                            price_eur_mwh=_price,
-                            hour_start=8, hour_end=20,
-                            days="weekend",
-                        ))
-                    else:
-                        _sim_purchases.append(SimulatedPurchase(
-                            label=f"{_product} #{i+1}",
-                            direction=_direction,
-                            volume_mw=_volume,
-                            price_eur_mwh=_price,
-                            hour_start=_h_start,
-                            hour_end=_h_end,
-                            days=_days,
-                        ))
-
-            if i < _n_purchases - 1:
-                st.markdown("---")
-
-        # ══════════════════════════════════════════════════════════════
-        # 3. MODE DE SIMULATION
-        # ══════════════════════════════════════════════════════════════
-        _mode_col1, _mode_col2 = st.columns([1, 3])
-        with _mode_col1:
-            _sim_mode = st.radio(
-                "Mode",
-                ["Impact cumulé", "Impact individuel"],
-                key="sim_mode",
-                help=(
-                    "**Cumulé** : tous les achats saisis sont ajoutés ensemble. "
-                    "**Individuel** : chaque achat est simulé séparément."
-                ),
-            )
-        _mode_key = "cumulated" if _sim_mode == "Impact cumulé" else "individual"
-
-        # ══════════════════════════════════════════════════════════════
-        # 4. PRÉPARATION DES DONNÉES & EXÉCUTION
-        # ══════════════════════════════════════════════════════════════
-        if not _sim_purchases:
-            st.info("Saisissez au moins un achat avec un volume > 0 MW pour lancer la simulation.")
-        else:
-            # Construction de l'index horaire
-            _hourly_idx = build_hourly_index(_sim_start, _sim_end)
-
-            # ── Consommation horaire (historique + prédictions) ─────
-            _conso_all = pd.concat([
-                hist_df[hist_df["site_label"].isin(selected_sites)],
-                preds_df[preds_df["site_label"].isin(selected_sites)],
-            ], ignore_index=True)
-            # Dédupliquer : privilégier historique
-            _conso_all = _conso_all.sort_values("data_type", ascending=True)  # Historique avant Prévision
-            _conso_all = _conso_all.drop_duplicates(subset=["datetime"], keep="first")
-            _conso_hourly = (
-                _conso_all
-                .groupby("datetime", as_index=False)["puissance_kw"].sum()
-                .set_index("datetime")
-                .reindex(_hourly_idx, fill_value=0.0)
-            )
-            _conso_hourly["conso_mwh"] = _conso_hourly["puissance_kw"] / 1000.0
-
-            # ── Prix spot horaire (prédictions Prophet) ────────────
-            _priority = ["mensuel", "trimestriel", "annuel"]
-            _spot_df = pd.DataFrame({"datetime": _hourly_idx})
-            _spot_df["prix_spot"] = price_for_datetimes(
-                _spot_df["datetime"], prices_df, "prix_base", _priority
-            ).values
-            _spot_df = _spot_df.set_index("datetime")
-            _spot_prices = _spot_df["prix_spot"].fillna(0.0)
-
-            # ── Portefeuille existant expansé en horaire ───────────
-            _achats_df = load_achats()
-            _achats_period = pd.DataFrame()
-            if not _achats_df.empty:
-                _achats_period = _achats_df[
-                    (_achats_df["DEB_PERIODE"] <= _sim_end) &
-                    (_achats_df["FIN_PERIODE"] >= _sim_start)
-                ].copy()
-
-            _portfolio_hourly = expand_portfolio_hourly(_achats_period, _hourly_idx)
-
-            # ── Exécution de la simulation ─────────────────────────
-            _result = run_simulation(
-                consumption_hourly=_conso_hourly,
-                spot_prices_hourly=_spot_prices,
-                portfolio_hourly=_portfolio_hourly,
-                simulated_purchases=_sim_purchases,
-                hourly_index=_hourly_idx,
-                mode=_mode_key,
-            )
-
-            _kpi_a = _result.kpi_a
-            _kpi_b = _result.kpi_b
-            _delta_prix = _kpi_b["prix_moyen_mwh"] - _kpi_a["prix_moyen_mwh"]
-            _delta_cout = _kpi_b["cout_total_eur"] - _kpi_a["cout_total_eur"]
-
-            # ══════════════════════════════════════════════════════════
-            # 5. VERDICT VISUEL
-            # ══════════════════════════════════════════════════════════
-            _seuil_marginal = 0.5  # €/MWh
-
-            if _delta_prix < -_seuil_marginal:
-                _verdict_color = "#10B981"
-                _verdict_icon = "🟢"
-                _verdict_text = "Achat favorable"
-                _verdict_detail = (
-                    f"Prix annuel réduit de **{abs(_delta_prix):.2f} €/MWh**, "
-                    f"économie totale de **{abs(_delta_cout):,.0f} €**"
-                )
-            elif _delta_prix > _seuil_marginal:
-                _verdict_color = "#EF4444"
-                _verdict_icon = "🔴"
-                _verdict_text = "Achat défavorable"
-                _verdict_detail = (
-                    f"Prix annuel augmenté de **{abs(_delta_prix):.2f} €/MWh**, "
-                    f"surcoût de **{abs(_delta_cout):,.0f} €**"
-                )
-            else:
-                _verdict_color = "#F59E0B"
-                _verdict_icon = "🟡"
-                _verdict_text = "Impact marginal"
-                _verdict_detail = (
-                    f"Écart de **{abs(_delta_prix):.2f} €/MWh** - "
-                    f"différence non significative (< {_seuil_marginal} €/MWh)"
-                )
-
-            st.markdown(f"""
-<div style="
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-left: 4px solid {_verdict_color};
-    border-radius: 16px;
+        # ── CSS cards premium ───────────────────────────────────────────────
+        st.markdown("""
+<style>
+.sim-card {
+        text-align: left;
+        font-size: 2rem;
+        font-weight: 800;
+        letter-spacing: 0.01em;
+        color: var(--text);
+        padding: 0.45rem 0.65rem;
+    }
+.sim-card h4 {
+    margin: 0 0 .8rem;
+    font-size: 1rem;
+    color: var(--muted, #64748b);
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    font-weight: 600;
+}
+.kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+    margin: 1rem 0;
+    width: 100%;
+}
+.kpi-grid .kpi-card {
+    width: 100%;
+    min-width: 0;
+    height: 100%;
+}
+@media (max-width: 1200px) {
+    .kpi-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+@media (max-width: 768px) {
+    .kpi-grid {
+        grid-template-columns: 1fr;
+    }
+}
+.kpi-box {
+    flex: 1;
+    min-width: 160px;
+    background: var(--surface, #fff);
+    border: 1px solid var(--border, #e5e7eb);
+    border-radius: 14px;
+    padding: 1rem 1.2rem;
+    text-align: center;
+    box-shadow: 0 1px 4px rgba(0,0,0,.05);
+}
+.kpi-box .kpi-label {
+    font-size: .78rem;
+    color: var(--muted, #64748b);
+    margin-bottom: .3rem;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+}
+.kpi-box .kpi-value { font-size: 1.5rem; font-weight: 700; color: var(--text, #1e293b); }
+.kpi-box .kpi-sub { font-size: .82rem; color: var(--muted, #64748b); margin-top: .2rem; }
+.verdict-card {
+    border-radius: 14px;
     padding: 1.2rem 1.5rem;
     margin: 1rem 0;
-    font-size: 0.95rem;
-    box-shadow: var(--shadow-soft);
-    backdrop-filter: blur(8px);
-">
-    <span style="font-size:1.3rem">{_verdict_icon}</span>
-    <strong style="font-size:1.1rem; color:{_verdict_color}; margin-left:0.3rem">{_verdict_text}</strong><br/>
-    <span style="color:var(--muted); font-size:0.88rem">{_verdict_detail}</span>
+    display: flex;
+    align-items: center;
+    gap: .8rem;
+}
+.verdict-text { font-size: 1.1rem; font-weight: 700; }
+.verdict-detail { font-size: .88rem; opacity: .85; }
+</style>
+""", unsafe_allow_html=True)
+
+        # ── Bloc 1 : Achats existants ───────────────────────────────────────
+        _achats_df = load_achats()
+        st.markdown('<div class="sim-card"><h4>Achats existants</h4>', unsafe_allow_html=True)
+        if _achats_df.empty:
+            st.caption("Aucun achat trouvé. Déposez un fichier ENEDIS_SUIVI_ACHAT_ENERGIE_*.csv dans data/raw/achats/.")
+        else:
+            _cols_map = {
+                "TYPE_ACHAT": "Type achat",
+                "FIXATION_PUISSANCE_ACHAT_MW": "MW",
+                "PRIX_FIXATION": "Prix (€/MWh)",
+                "DEB_PERIODE": "Début",
+                "FIN_PERIODE": "Fin",
+            }
+            _disp_cols = {k: v for k, v in _cols_map.items() if k in _achats_df.columns}
+            st.dataframe(
+                _achats_df[list(_disp_cols)].rename(columns=_disp_cols).reset_index(drop=True),
+                use_container_width=True,
+                hide_index=True,
+            )
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # ── Graphique annuel état actuel (avant simulation) ───────────────
+
+        # Extraire les années disponibles des données
+        _available_years = sorted(_sim_source_df['datetime'].dt.year.unique().tolist()) if not _sim_source_df.empty else [2027]
+
+        _current_year = pd.Timestamp.now().year
+        _years_from_now = sorted([int(y) for y in _available_years if int(y) >= _current_year])
+        if not _years_from_now:
+            _years_from_now = [_current_year]
+
+        _state_rows = []
+        for _yr in _years_from_now:
+            _y_start = pd.Timestamp(f"{_yr}-01-01")
+            _y_end = pd.Timestamp(f"{_yr}-12-31 23:59:59")
+
+            if _yr == _current_year:
+                _year_hist = _all_hist[
+                    (_all_hist["datetime"] >= _y_start) & (_all_hist["datetime"] <= _y_end)
+                ].copy() if not _all_hist.empty else pd.DataFrame()
+                _year_pred = _all_pred[
+                    (_all_pred["datetime"] >= _y_start) & (_all_pred["datetime"] <= _y_end)
+                ].copy() if not _all_pred.empty else pd.DataFrame()
+
+                if not _year_hist.empty and not _year_pred.empty:
+                    _hist_dtimes = set(_year_hist["datetime"].dt.floor("h"))
+                    _year_pred_compl = _year_pred[~_year_pred["datetime"].dt.floor("h").isin(_hist_dtimes)]
+                    _year_source = pd.concat([_year_hist, _year_pred_compl], ignore_index=True)
+                elif not _year_hist.empty:
+                    _year_source = _year_hist
+                else:
+                    _year_source = _year_pred
+            else:
+                _year_source = _all_pred if not _all_pred.empty else _sim_source_df
+
+            _hourly_year = _sim_conso_horaire(_year_source, _y_start, _y_end)
+            if _hourly_year.empty and not _sim_source_df.empty:
+                _hourly_year = _sim_conso_horaire(_sim_source_df, _y_start, _y_end)
+
+            _hourly_year = _sim_prix_horaire(prices_df, _hourly_year, price_col="prix_base")
+
+            _year_conso_mwh = float(_hourly_year["energy_mwh"].sum()) if not _hourly_year.empty else 0.0
+            _year_spot_moy = (
+                float((_hourly_year["energy_mwh"] * _hourly_year["prix_spot"]).sum() / _year_conso_mwh)
+                if (not _hourly_year.empty and _year_conso_mwh > 0)
+                else 55.0
+            )
+
+            _year_achete_mwh, _year_prix_achete = purchased_components_for_period(_achats_df, _y_start, _y_end)
+            _year_prix_achete = _year_prix_achete if _year_prix_achete > 0 else _year_spot_moy
+            _year_achete_mwh = float(min(_year_achete_mwh, _year_conso_mwh))
+            _year_restant_mwh = float(max(0.0, _year_conso_mwh - _year_achete_mwh))
+
+            _year_cout_achete = float(_year_achete_mwh * _year_prix_achete)
+            if not _hourly_year.empty and _year_conso_mwh > 0:
+                _ratio_achete_year = float(min(max(_year_achete_mwh / _year_conso_mwh, 0.0), 1.0))
+                _mwh_restant_year_h = _hourly_year["energy_mwh"] * (1.0 - _ratio_achete_year)
+                _year_cout_restant = float((_mwh_restant_year_h * _hourly_year["prix_spot"]).sum())
+            else:
+                _year_cout_restant = float(_year_restant_mwh * _year_spot_moy)
+
+            _state_rows.append({
+                "year": _yr,
+                "achete_mwh": _year_achete_mwh,
+                "restant_mwh": _year_restant_mwh,
+                "cout_achete_eur": _year_cout_achete,
+                "cout_restant_eur": _year_cout_restant,
+            })
+
+        _state_yearly_df = pd.DataFrame(_state_rows).sort_values("year").reset_index(drop=True)
+
+        st.plotly_chart(
+            fig_current_state_yearly_bar(_state_yearly_df, _current_year),
+            use_container_width=True,
+            key="chart_current_state_yearly_bar_1",
+        )
+
+        # ── Bloc 2 : Période simulée ────────────────────────────────────────
+        st.markdown('<div class="sim-card"><h4>Période simulée</h4>', unsafe_allow_html=True)
+
+
+        # Choix du type de période
+        _col_type_period = st.columns(2)
+        with _col_type_period[0]:
+            _period_type = st.radio(
+                "Type de période",
+                ["Année complète", "Période personnalisée"],
+                horizontal=True,
+                key="sim_period_type"
+            )
+
+        if _period_type == "Année complète":
+            # Mode année complète
+            with _col_type_period[1]:
+                _selected_year = st.selectbox(
+                    "Année",
+                    options=_available_years,
+                    index=len(_available_years) - 1,
+                    key="sim_s_year"
+                )
+            _sim_start = pd.Timestamp(f"{_selected_year}-01-01")
+            _sim_end = pd.Timestamp(f"{_selected_year}-12-31 23:59:59")
+        else:
+            # Mode période personnalisée avec slider par mois
+            _min_date = pd.Timestamp(_sim_source_df['datetime'].min()) if not _sim_source_df.empty else pd.Timestamp("2025-01-01")
+            _max_date = pd.Timestamp(_sim_source_df['datetime'].max()) if not _sim_source_df.empty else pd.Timestamp("2027-12-31")
+
+            # Convertir en nombre de mois depuis une référence
+            _ref_date = pd.Timestamp("2020-01-01")
+            _min_months = (_min_date.year - _ref_date.year) * 12 + (_min_date.month - _ref_date.month)
+            _max_months = (_max_date.year - _ref_date.year) * 12 + (_max_date.month - _ref_date.month)
+            _default_start = _min_months
+            _default_end = _max_months
+
+            # Créer un dictionnaire pour afficher les labels mois/année
+            _month_labels = {}
+            for m in range(_min_months, _max_months + 1):
+                _year = _ref_date.year + m // 12
+                _month = (_ref_date.month + m % 12 - 1) % 12 + 1
+                _month_labels[m] = pd.Timestamp(f"{_year}-{_month:02d}-01").strftime("%b %Y")
+
+            _selected_range = st.select_slider(
+                "Période (mois)",
+                options=list(range(_min_months, _max_months + 1)),
+                value=(_default_start, _default_end),
+                format_func=lambda x: _month_labels.get(x, str(x)),
+                key="sim_period_slider"
+            )
+            # Convertir les mois en dates
+            _start_months = _selected_range[0]
+            _end_months = _selected_range[1]
+            _start_year = _ref_date.year + _start_months // 12
+            _start_month = (_ref_date.month + _start_months % 12 - 1) % 12 + 1
+            _end_year = _ref_date.year + _end_months // 12
+            _end_month = (_ref_date.month + _end_months % 12 - 1) % 12 + 1
+
+            _sim_start = pd.Timestamp(f"{_start_year}-{_start_month:02d}-01")
+            _sim_end = (pd.Timestamp(f"{_end_year}-{_end_month:02d}-01") + pd.DateOffset(months=1)) - pd.Timedelta(seconds=1)
+
+            # Afficher la plage sélectionnée
+            _range_display = f"{_sim_start.strftime('%B %Y')} → {_sim_end.strftime('%B %Y')}"
+            st.caption(f"Période : {_range_display}")
+
+        st.markdown('</div>', unsafe_allow_html=True)
+
+
+        # ── Bloc 3 : Paramètres de simulation ──────────────────────────────
+        st.markdown('<div class="sim-card"><h4>Simulation</h4>', unsafe_allow_html=True)
+        _fc1, _fc2, _fc3, _fc4 = st.columns([1, 1, 1, 1])
+        with _fc1:
+            _sim_type = st.selectbox("Type achat", ["Base", "Peak"], key="sim_s_type")
+        with _fc2:
+            _sim_sens = st.radio("Sens", ["Achat", "Vente"], horizontal=True, key="sim_s_sens")
+        with _fc3:
+            _sim_vol = st.number_input(
+                "Volume (MW)", min_value=0.0, value=1.0, step=0.5, format="%.1f", key="sim_s_vol"
+            )
+        with _fc4:
+            _sim_prix = st.number_input(
+                "Prix (€/MWh)", min_value=0.0, value=52.5, step=0.5, format="%.2f", key="sim_s_prix"
+            )
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # ── Bouton unique ───────────────────────────────────────────────────
+        _btn = st.button("▶ Faire simulation", type="primary", key="sim_s_run")
+
+        if _btn:
+            _n_jours  = max(1, (_sim_end - _sim_start).days + 1)
+            # ════════════════════════════════════════════════════════════
+            # GRAPHIQUE COMPARATIF  «En l'état» vs «Simulé»
+            # Source de vérité :
+            #   conso totale  = prévisions LSTM sur la période
+            #   vol acheté    = CSV Enedis (MW × heures)
+            #   prix acheté   = moyenne pondérée des prix fixes CSV
+            #   restant spot  = conso prédite − vol acheté
+            # ════════════════════════════════════════════════════════════
+
+            # 1. Consommation PRÉDITE — source exclusive : preds_df (LSTM)
+            #    On ne mélange PAS l'historique : pour une année future comme
+            #    2027, le total de la barre doit refléter exactement ce que
+            #    le modèle prédit, indépendamment des données réelles passées.
+            _hourly_pred = _sim_conso_horaire(_all_pred, _sim_start, _sim_end)
+            _hourly_pred_spot = _sim_prix_horaire_selon_type(prices_df, _hourly_pred, _sim_type)
+            _hourly_pred_plot = _hourly_pred.copy()
+            if _hourly_pred_plot.empty:
+                _hourly_fallback = _sim_conso_horaire(_sim_source_df, _sim_start, _sim_end)
+                _hourly_pred_plot = _hourly_fallback.copy()
+            if _hourly_pred_spot.empty:
+                _hourly_pred_spot = _sim_prix_horaire_selon_type(prices_df, _hourly_pred_plot, _sim_type)
+
+            if _sim_type == "Peak" and not _hourly_pred_spot.empty and "is_peak_slot" in _hourly_pred_spot.columns:
+                _n_heures = int(_hourly_pred_spot["is_peak_slot"].sum())
+            else:
+                _n_heures = len(_hourly_pred_spot)
+            _conso_predite_mwh = (
+                float(_hourly_pred_spot["energy_mwh"].sum())
+                if not _hourly_pred_spot.empty
+                else 0.0
+            )
+            if not _hourly_pred_spot.empty and _conso_predite_mwh > 0:
+                _spot_moy = float(
+                    (_hourly_pred_spot["energy_mwh"] * _hourly_pred_spot["prix_spot"]).sum()
+                    / _conso_predite_mwh
+                )
+            elif not _hourly_pred_spot.empty:
+                _spot_moy = float(_hourly_pred_spot["prix_spot"].mean())
+            else:
+                _spot_moy = 55.0
+
+            # KPI Conso prédite : sur année en cours, compléter avec historique réel
+            _conso_kpi_mwh = _conso_predite_mwh
+            if _sim_start.year <= _current_year <= _sim_end.year:
+                _hourly_hist = _sim_conso_horaire(_all_hist, _sim_start, _sim_end)
+
+                if not _hourly_hist.empty:
+                    _hist_hours = set(_hourly_hist["datetime"])
+                    _pred_wo_hist = _hourly_pred_spot.loc[
+                        ~_hourly_pred_spot["datetime"].isin(_hist_hours)
+                    ].copy() if not _hourly_pred_spot.empty else pd.DataFrame()
+                    _conso_kpi_mwh = float(_hourly_hist["energy_mwh"].sum())
+                    if not _pred_wo_hist.empty:
+                        _conso_kpi_mwh += float(_pred_wo_hist["energy_mwh"].sum())
+
+            # 2. Achats déjà effectués sur la période (depuis CSV Enedis)
+            _vol_achete_mwh, _prix_moy_achete = purchased_components_for_period(
+                _achats_df, _sim_start, _sim_end
+            )
+            # Fallback : si le CSV ne donne pas de coût, utiliser le spot moyen
+            _prix_moy_achete = _prix_moy_achete if _prix_moy_achete > 0 else _spot_moy
+            # Plafonner le volume acheté à la consommation prédite
+            _vol_achete_mwh = min(_vol_achete_mwh, _conso_predite_mwh)
+
+            # 3. Situation «En l'état»
+            #    orange = déjà acheté   |   gris = restant au spot
+            _en_etat_achete_mwh   = _vol_achete_mwh
+            _en_etat_restant_mwh  = max(0.0, _conso_predite_mwh - _en_etat_achete_mwh)
+            _en_etat_cout_achete  = _en_etat_achete_mwh  * _prix_moy_achete
+            if not _hourly_pred_spot.empty and _conso_predite_mwh > 0:
+                _ratio_achete = _en_etat_achete_mwh / _conso_predite_mwh
+                _ratio_achete = float(min(max(_ratio_achete, 0.0), 1.0))
+                _mwh_restant_en_etat_h = _hourly_pred_spot["energy_mwh"] * (1.0 - _ratio_achete)
+                _en_etat_cout_restant = float((_mwh_restant_en_etat_h * _hourly_pred_spot["prix_spot"]).sum())
+            else:
+                _en_etat_cout_restant = _en_etat_restant_mwh * _spot_moy
+
+            # 4. Situation «Simulée»
+            #    Volume simulé = MW saisis × nombre d'heures de la période.
+            _vol_simule_mwh = _sim_vol * _n_heures   # MW → MWh
+            _simule_nouvel_mwh = 0.0
+            _simule_vendu_mwh = 0.0
+
+            if _sim_sens == "Achat":
+                # Achat additionnel plafonné au restant non couvert.
+                _simule_nouvel_mwh = min(_vol_simule_mwh, _en_etat_restant_mwh)
+                _simule_achete_mwh = _en_etat_achete_mwh
+            else:
+                # Vente plafonnée au volume déjà acheté.
+                _simule_vendu_mwh = min(_vol_simule_mwh, _en_etat_achete_mwh)
+                _simule_achete_mwh = max(0.0, _en_etat_achete_mwh - _simule_vendu_mwh)
+
+            _simule_restant_mwh = max(0.0, _conso_predite_mwh - _simule_achete_mwh - _simule_nouvel_mwh)
+            _simule_cout_achete = _simule_achete_mwh * _prix_moy_achete
+            _simule_cout_nouvel = _simule_nouvel_mwh * _sim_prix
+            _simule_revenu_vente = _simule_vendu_mwh * _sim_prix
+
+            if not _hourly_pred_spot.empty and _conso_predite_mwh > 0:
+                _ratio_couvert_simule = (_simule_achete_mwh + _simule_nouvel_mwh) / _conso_predite_mwh
+                _ratio_couvert_simule = float(min(max(_ratio_couvert_simule, 0.0), 1.0))
+                _mwh_spot_simule_h = _hourly_pred_spot["energy_mwh"] * (1.0 - _ratio_couvert_simule)
+                _simule_cout_restant = float((_mwh_spot_simule_h * _hourly_pred_spot["prix_spot"]).sum())
+            else:
+                _simule_cout_restant = _simule_restant_mwh * _spot_moy
+
+            # 5. Graphique
+            st.markdown("---")
+
+                        # 6. Récapitulatif textuel
+            _total_en_etat = _en_etat_cout_achete + _en_etat_cout_restant
+            _total_simule  = _simule_cout_achete + _simule_cout_nouvel + _simule_cout_restant - _simule_revenu_vente
+            _gain_sim      = _total_en_etat - _total_simule
+            _gain_color = "#10B981" if _gain_sim > 0 else "#EF4444"
+            _gain_label = "économie" if _gain_sim > 0 else "surcoût"
+
+            # ── KPI cards (3 KPI) alignées avec le graphique ─────────────
+            _periode_lbl = f"{_sim_start.strftime('%d/%m/%Y')} → {_sim_end.strftime('%d/%m/%Y')}"
+            _ecart_cout = _total_simule - _total_en_etat
+            _ecart_pct = (_ecart_cout / _total_en_etat * 100.0) if _total_en_etat > 0 else 0.0
+            _kpi_ecart_color = (
+                "#10B981" if _ecart_cout < -500 else
+                "#EF4444" if _ecart_cout > 500 else
+                "#F59E0B"
+            )
+            _ecart_symbol = "▼" if _ecart_cout < -500 else ("▲" if _ecart_cout > 500 else "■")
+            _conso_sub = "Historique + prévisions (année en cours)" if _sim_start.year <= _current_year <= _sim_end.year else "Prévisions sur la période"
+
+            st.markdown(f"""
+<div class="kpi-grid">
+    <div class="kpi-card kpi-gray">
+        <div class="kpi-label">Période</div>
+        <div class="kpi-value" style="font-size:1.05rem">{_periode_lbl}</div>
+        <div class="kpi-sub">&nbsp;</div>
+    </div>
+    <div class="kpi-card kpi-blue">
+        <div class="kpi-label">Conso prédite</div>
+        <div class="kpi-value">{format_int_space(_conso_kpi_mwh)} MWh</div>
+        <div class="kpi-sub">{_conso_sub}</div>
+    </div>
+    <div class="kpi-card kpi-amber">
+        <div class="kpi-label">Coûts</div>
+        <div class="kpi-value" style="font-size:1.15rem">Avant : {_total_en_etat/1e3:,.1f} k€</div>
+        <div class="kpi-value" style="font-size:1.15rem">Après : {_total_simule/1e3:,.1f} k€</div>
+        <div class="kpi-sub"><span style="color:{_kpi_ecart_color}; font-weight:600">{_ecart_symbol} {_ecart_cout/1e3:+,.1f} k€ ({_ecart_pct:+.1f}%)</span></div>
+    </div>
 </div>
 """, unsafe_allow_html=True)
 
-            # ══════════════════════════════════════════════════════════
-            # 6. KPIs COMPARATIFS - Bloc 1 (vue globale)
-            # ══════════════════════════════════════════════════════════
-            st.markdown("### 📊 KPIs - Vue globale")
-
-            _k1, _k2, _k3 = st.columns(3)
-            _k1.metric(
-                "Prix moyen all-in (€/MWh)",
-                f"{_kpi_b['prix_moyen_mwh']:.2f}",
-                delta=f"{_delta_prix:+.2f} €/MWh",
-                delta_color="inverse",
-                help="Coût total / Consommation totale sur la période",
-            )
-            _k2.metric(
-                "Coût total énergie (€)",
-                f"{_kpi_b['cout_total_eur'] / 1e6:,.3f} M€",
-                delta=f"{_delta_cout / 1e6:+,.3f} M€",
-                delta_color="inverse",
-                help="Somme de tous les coûts horaires sur la période",
-            )
-            _econo_label = "Économie" if _delta_cout < 0 else "Surcoût"
-            _k3.metric(
-                f"{_econo_label} généré (€)",
-                f"{abs(_delta_cout):,.0f} €",
-                delta=f"{'📉 favorable' if _delta_cout < 0 else '📈 défavorable'}",
-                delta_color="normal" if _delta_cout < 0 else "inverse",
-            )
-
-            # ── Tableau Scénario A vs B ────────────────────────────
-            st.markdown("#### Scénario A (référence) vs Scénario B (simulé)")
-            _comp_tab = pd.DataFrame({
-                "KPI": [
-                    "Prix moyen all-in (€/MWh)",
-                    "Coût total énergie (€)",
-                ],
-                "Scénario A (référence)": [
-                    f"{_kpi_a['prix_moyen_mwh']:.2f}",
-                    f"{_kpi_a['cout_total_eur']:,.0f}",
-                ],
-                "Scénario B (simulé)": [
-                    f"{_kpi_b['prix_moyen_mwh']:.2f}",
-                    f"{_kpi_b['cout_total_eur']:,.0f}",
-                ],
-                "Écart": [
-                    f"{_delta_prix:+.2f}",
-                    f"{_delta_cout:+,.0f}",
-                ],
-            })
-            st.dataframe(_comp_tab, use_container_width=True, hide_index=True)
-
-            # ══════════════════════════════════════════════════════════
-            # 7. KPIs - Bloc 2 (exposition)
-            # ══════════════════════════════════════════════════════════
-            st.markdown("### 🔍 Détail de l'exposition")
-
-            _e1, _e2, _e3 = st.columns(3)
-            _e1.metric(
-                "Volume couvert à terme (MWh)",
-                f"{_kpi_b['vol_forward_mwh']:,.0f}",
-                delta=f"{_kpi_b['vol_forward_mwh'] - _kpi_a['vol_forward_mwh']:+,.0f}",
-                delta_color="normal",
-            )
-            _pct_spot_b = _kpi_b["pct_spot"]
-            _e2.metric(
-                "Volume au spot (MWh / %)",
-                f"{_kpi_b['vol_spot_mwh']:,.0f} ({_pct_spot_b:.1f}%)",
-                delta=f"{_kpi_b['vol_spot_mwh'] - _kpi_a['vol_spot_mwh']:+,.0f}",
-                delta_color="inverse",
-            )
-            _e3.metric(
-                "Prix moy. portefeuille terme (€/MWh)",
-                f"{_kpi_b['prix_moyen_forward_mwh']:.2f}",
-                delta=f"{_kpi_b['prix_moyen_forward_mwh'] - _kpi_a['prix_moyen_forward_mwh']:+.2f}",
-                delta_color="inverse",
-            )
-
-            # Tableau exposition détaillé
-            _expo_tab = pd.DataFrame({
-                "Indicateur": [
-                    "Consommation totale (MWh)",
-                    "Volume couvert à terme (MWh)",
-                    "Volume régularisé spot (MWh)",
-                    "Couverture terme (%)",
-                    "Exposition spot (%)",
-                    "Prix moy. terme (€/MWh)",
-                    "Coût terme (€)",
-                    "Coût spot (€)",
-                    "Coût total (€)",
-                ],
-                "Scénario A": [
-                    f"{_kpi_a['conso_total_mwh']:,.0f}",
-                    f"{_kpi_a['vol_forward_mwh']:,.0f}",
-                    f"{_kpi_a['vol_spot_mwh']:,.0f}",
-                    f"{_kpi_a['pct_forward']:.1f}%",
-                    f"{_kpi_a['pct_spot']:.1f}%",
-                    f"{_kpi_a['prix_moyen_forward_mwh']:.2f}",
-                    f"{_kpi_a['cout_forward_eur']:,.0f}",
-                    f"{_kpi_a['cout_spot_eur']:,.0f}",
-                    f"{_kpi_a['cout_total_eur']:,.0f}",
-                ],
-                "Scénario B": [
-                    f"{_kpi_b['conso_total_mwh']:,.0f}",
-                    f"{_kpi_b['vol_forward_mwh']:,.0f}",
-                    f"{_kpi_b['vol_spot_mwh']:,.0f}",
-                    f"{_kpi_b['pct_forward']:.1f}%",
-                    f"{_kpi_b['pct_spot']:.1f}%",
-                    f"{_kpi_b['prix_moyen_forward_mwh']:.2f}",
-                    f"{_kpi_b['cout_forward_eur']:,.0f}",
-                    f"{_kpi_b['cout_spot_eur']:,.0f}",
-                    f"{_kpi_b['cout_total_eur']:,.0f}",
-                ],
-            })
-            st.dataframe(_expo_tab, use_container_width=True, hide_index=True)
-
-            # ══════════════════════════════════════════════════════════
-            # 8. GRAPHIQUE 1 - Coût cumulé A vs B (jour par jour)
-            # ══════════════════════════════════════════════════════════
-            st.markdown("### 📈 Coût cumulé - Scénario A vs B")
-
-            _daily_a = _result.daily_a.copy()
-            _daily_b = _result.daily_b.copy()
-            _daily_a["cum_cost"] = _daily_a["cost_total_eur"].cumsum()
-            _daily_b["cum_cost"] = _daily_b["cost_total_eur"].cumsum()
-
-            fig_cum = go.Figure()
-            fig_cum.add_trace(go.Scatter(
-                x=_daily_a["date"], y=_daily_a["cum_cost"] / 1e6,
-                mode="lines", name="Sc\u00e9nario A (r\u00e9f\u00e9rence)",
-                line=dict(color=_chart_palette()[0], width=2.2),
-                fill=None,
-            ))
-            fig_cum.add_trace(go.Scatter(
-                x=_daily_b["date"], y=_daily_b["cum_cost"] / 1e6,
-                mode="lines", name="Sc\u00e9nario B (simul\u00e9)",
-                line=dict(color="#2DD4BF", width=2.2),
-                fill="tonexty",
-                fillcolor="rgba(45, 212, 191, 0.08)",
-            ))
-            fig_cum.update_layout(
-                title=dict(
-                    text="Coût cumulé jour par jour (M€)",
-                    font=dict(size=14, color=_title_color()),
-                    x=0,
+            st.plotly_chart(
+                fig_simulation_purchase_comparison(
+                    en_etat_achete_mwh           = _en_etat_achete_mwh,
+                    en_etat_restant_mwh          = _en_etat_restant_mwh,
+                    simule_achete_mwh            = _simule_achete_mwh,
+                    simule_nouvel_achat_mwh      = _simule_nouvel_mwh,
+                    simule_vendu_mwh             = _simule_vendu_mwh,
+                    simule_restant_mwh           = _simule_restant_mwh,
+                    en_etat_cout_achete_eur      = _en_etat_cout_achete,
+                    en_etat_cout_restant_eur     = _en_etat_cout_restant,
+                    simule_cout_achete_eur       = _simule_cout_achete,
+                    simule_cout_nouvel_achat_eur = _simule_cout_nouvel,
+                    simule_revenu_vente_eur      = _simule_revenu_vente,
+                    simule_cout_restant_eur      = _simule_cout_restant,
                 ),
-                yaxis_title="M€",
+                use_container_width=True,
+            key="chart_simulation_purchase_comparison_1",
+        )
+
+            _operation_label = "Achat simulé" if _sim_sens == "Achat" else "Vente simulée"
+            _operation_volume = _simule_nouvel_mwh if _sim_sens == "Achat" else _simule_vendu_mwh
+            st.markdown(
+                f"<div style='text-align:center; font-size:.9rem; color:{_gain_color}; margin-top:-.5rem;'>"
+                f"{'▼' if _gain_sim > 0 else '▲'} "
+                f"<b>{abs(_gain_sim)/1e3:,.1f} k€ de {_gain_label}</b> "
+                f"par rapport à la situation en l'état&nbsp;·&nbsp;"
+                f"Conso prédite : <b>{format_int_space(_conso_kpi_mwh)} MWh</b>&nbsp;·&nbsp;"
+                f"Déjà acheté : <b>{format_int_space(_vol_achete_mwh)} MWh</b> @ <b>{_prix_moy_achete:.2f} €/MWh</b>&nbsp;·&nbsp;"
+                f"{_operation_label} : <b>{format_int_space(_operation_volume)} MWh</b> @ <b>{_sim_prix:.2f} €/MWh</b>&nbsp;·&nbsp;"
+                f"Spot futur : <b>{_spot_moy:.2f} €/MWh</b>"
+                f"</div>",
+                unsafe_allow_html=True,
             )
-            _plotly_layout(fig_cum, height=440, x_grid=False, y_grid=True)
-            st.plotly_chart(fig_cum, use_container_width=True)
-
-            # ══════════════════════════════════════════════════════════
-            # 9. GRAPHIQUE 2 - Histogramme des écarts quotidiens
-            # ══════════════════════════════════════════════════════════
-            st.markdown("### 📊 Écarts quotidiens - B meilleur / moins bon que A")
-
-            _daily_diff = pd.DataFrame({
-                "date": _daily_a["date"],
-                "ecart_eur": _daily_b["cost_total_eur"].values - _daily_a["cost_total_eur"].values,
-            })
-            _daily_diff["couleur"] = np.where(
-                _daily_diff["ecart_eur"] <= 0, "B meilleur (économie)", "B moins bon (surcoût)"
-            )
-
-            fig_ecart = go.Figure()
-            _mask_pos = _daily_diff["ecart_eur"] > 0
-            _mask_neg = _daily_diff["ecart_eur"] <= 0
-            fig_ecart.add_trace(go.Bar(
-                x=_daily_diff.loc[_mask_neg, "date"],
-                y=_daily_diff.loc[_mask_neg, "ecart_eur"],
-                name="B meilleur (\u00e9conomie)",
-                marker_color="#34D399",
-                marker_line=dict(width=0),
-            ))
-            fig_ecart.add_trace(go.Bar(
-                x=_daily_diff.loc[_mask_pos, "date"],
-                y=_daily_diff.loc[_mask_pos, "ecart_eur"],
-                name="B moins bon (surco\u00fbt)",
-                marker_color="#F87171",
-                marker_line=dict(width=0),
-            ))
-            # Ligne zéro
-            fig_ecart.add_hline(y=0, line_width=1, line_color=_title_color(), opacity=0.3)
-            fig_ecart.update_layout(
-                title=dict(
-                    text="Écart de coût quotidien B − A (€)",
-                    font=dict(size=14, color=_title_color()),
-                    x=0,
-                ),
-                yaxis_title="€",
-                barmode="relative",
-            )
-            _plotly_layout(fig_ecart, height=380, x_grid=False, y_grid=True)
-            st.plotly_chart(fig_ecart, use_container_width=True)
-
-            # ══════════════════════════════════════════════════════════
-            # 10. RÉCAPITULATIF DES ACHATS SIMULÉS
-            # ══════════════════════════════════════════════════════════
-            st.markdown("### 📋 Récapitulatif des achats simulés")
-
-            if _mode_key == "individual" and _result.individual_impacts:
-                _recap_rows = []
-                for imp in _result.individual_impacts:
-                    p = imp["purchase"]
-                    _recap_rows.append({
-                        "Produit": p.label,
-                        "Sens": p.direction,
-                        "Volume (MW)": f"{p.volume_mw:.1f}",
-                        "Prix (€/MWh)": f"{p.price_eur_mwh:.2f}",
-                        "Plage": f"{p.hour_start}h–{p.hour_end}h",
-                        "Jours": {"all": "Tous", "business": "Ouvrés", "weekend": "WE"}[p.days],
-                        "Volume simulé (MWh)": f"{imp['vol_sim_mwh']:,.0f}",
-                        "Δ Prix (€/MWh)": f"{imp['delta_prix_mwh']:+.2f}",
-                        "Δ Coût (€)": f"{imp['delta_cout_total']:+,.0f}",
-                    })
-                st.dataframe(
-                    pd.DataFrame(_recap_rows),
-                    use_container_width=True,
-                    hide_index=True,
-                )
-            else:
-                # Mode cumulé : un seul récap des achats saisis
-                _recap_rows = []
-                for p in _sim_purchases:
-                    _exp = expand_purchase_hourly(p, _hourly_idx)
-                    _recap_rows.append({
-                        "Produit": p.label,
-                        "Sens": p.direction,
-                        "Volume (MW)": f"{p.volume_mw:.1f}",
-                        "Prix (€/MWh)": f"{p.price_eur_mwh:.2f}",
-                        "Plage": f"{p.hour_start}h–{p.hour_end}h",
-                        "Jours": {"all": "Tous", "business": "Ouvrés", "weekend": "WE"}[p.days],
-                        "Volume total (MWh)": f"{abs(_exp['vol_sim_mwh'].sum()):,.0f}",
-                    })
-                st.dataframe(
-                    pd.DataFrame(_recap_rows),
-                    use_container_width=True,
-                    hide_index=True,
-                )
-
-            # ══════════════════════════════════════════════════════════
-            # 11. PORTEFEUILLE EXISTANT (référence)
-            # ══════════════════════════════════════════════════════════
-            with st.expander("📂 Portefeuille d'achats existants", expanded=False):
-                if _achats_period.empty:
-                    st.markdown(
-                        '<div class="info-subtle">Aucun achat trouvé sur la période. '
-                        'Déposez un fichier ENEDIS_SUIVI_ACHAT_ENERGIE_*.csv dans data/raw/achats/.</div>',
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    _cols_show = [
-                        c for c in [
-                            "TYPE_ACHAT", "CONTREPARTIE",
-                            "FIXATION_PUISSANCE_ACHAT_MW", "PRIX_FIXATION",
-                            "VOLUME_TOTAL_PERIODE", "COUT_TOTAL_PERIODE",
-                            "DEB_PERIODE", "FIN_PERIODE",
-                        ] if c in _achats_period.columns
-                    ]
-                    st.dataframe(
-                        _achats_period[_cols_show].rename(columns={
-                            "TYPE_ACHAT": "Type",
-                            "CONTREPARTIE": "Contrepartie",
-                            "FIXATION_PUISSANCE_ACHAT_MW": "MW",
-                            "PRIX_FIXATION": "Prix (€/MWh)",
-                            "VOLUME_TOTAL_PERIODE": "Volume (MWh)",
-                            "COUT_TOTAL_PERIODE": "Coût (€)",
-                            "DEB_PERIODE": "Début",
-                            "FIN_PERIODE": "Fin",
-                        }),
-                        use_container_width=True,
-                        hide_index=True,
-                    )
-
-            # ── Export optionnel des données horaires ──────────────
-            with st.expander("📥 Export données horaires (optionnel)", expanded=False):
-                _export_df = _result.scenario_b.copy()
-                _export_df["scenario"] = "B"
-                _export_a = _result.scenario_a.copy()
-                _export_a["scenario"] = "A"
-                _export_full = pd.concat([_export_a, _export_df], ignore_index=False)
-                st.download_button(
-                    label="📥 Télécharger les données horaires (CSV)",
-                    data=_export_full.to_csv(),
-                    file_name="simulation_horaire_export.csv",
-                    mime="text/csv",
-                )

@@ -237,6 +237,18 @@ docker compose up --build
 Par défaut :
 - `api-dataclean` exposée sur `8000`
 - `api-inference` exposée sur `8001`
+- `dashboard` Streamlit exposé sur `8501` (`http://localhost:8501`)
+- l'authentification du dashboard réutilise la base locale `users.db` montée dans le conteneur
+
+Persistance des nouveaux entraînements en mode Docker :
+- les modèles générés par `api-inference` sont persistés dans le volume Docker nommé `trained-models` (monté sur `/app/models/saved`).
+- vérifier les volumes : `docker volume ls`
+
+Lancer uniquement la stack nécessaire au dashboard (APIs + dashboard) :
+
+```bash
+docker compose up --build api-dataclean api-inference dashboard
+```
 
 Profil local optionnel (ngrok + sync config) :
 
@@ -257,8 +269,14 @@ docker compose --profile local up --build
 - Vérifier l'accès réseau/ODBC vers Fabric/SQL
 
 ### Erreur `404 Modèle introuvable`
-- Vérifier la présence des fichiers `.pkl` dans `models/saved/`
+- En local (hors Docker), vérifier la présence des fichiers `.pkl` dans `models/saved/`
+- En Docker, vérifier le volume `trained-models` (modèles dans `/app/models/saved` du conteneur)
 - Vérifier le format de nom : `prophet_model_<prm>_latest.pkl`
+
+### Erreur `Identifiants invalides` sur le dashboard Docker
+- Vérifier la présence du fichier `users.db` à la racine de `Modeles_TimesSeries`
+- Vérifier que le service `dashboard` monte bien `./users.db:/app/users.db`
+- Si besoin, redémarrer le service : `docker compose up -d --build dashboard`
 
 ---
 

@@ -59,8 +59,8 @@ services:
     volumes:
       # Code API monté en live (évite rebuild complet à chaque correctif)
       - ./api/api-inference/app:/app/app
-      # Modèles entraînés (lecture/écriture pour pouvoir en rajouter)
-      - ./models/saved:/app/models/saved
+      # Modèles entraînés persistés via volume Docker
+      - trained-models:/app/models/saved
       # MLflow runs (pour les métriques)
       - ./api/api-inference/mlruns:/app/mlruns
       # Prédictions persistées sur l'hôte
@@ -116,7 +116,37 @@ services:
     profiles:
       - local
 
+  # ───────────────────────────────────────────────────────────
+  # Dashboard Streamlit — visualisation métier
+  # Port : 8501
+  # ───────────────────────────────────────────────────────────
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    container_name: dashboard-streamlit
+    environment:
+      - API_INFERENCE_URL=http://api-inference:8001
+      - API_DATACLEAN_URL=http://api-dataclean:8000
+      - API_KEY=${INFERENCE_API_KEY:-dev-inference-key}
+    ports:
+      - "8501:8501"
+    volumes:
+      # Base SQLite des utilisateurs partagée avec l'hôte
+      - ./users.db:/app/users.db
+    depends_on:
+      api-dataclean:
+        condition: service_healthy
+      api-inference:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - conso-network
+
 # ─── Réseau interne partagé ────────────────────────────────
 networks:
   conso-network:
     driver: bridge
+
+volumes:
+  trained-models:
