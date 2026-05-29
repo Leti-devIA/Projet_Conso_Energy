@@ -196,6 +196,8 @@ def append_fabric_outbox_record(payload: dict) -> None:
     "/latest",
     response_model=LatestModelsResponse,
     summary="Récupérer tous les derniers modèles entraînés",
+    description="Liste les modèles `_latest.pkl` détectés localement avec leurs métriques.",
+    response_description="Liste des derniers modèles",
 )
 async def get_latest_models() -> LatestModelsResponse:
     """
@@ -260,6 +262,8 @@ async def get_latest_models() -> LatestModelsResponse:
     "/latest/ia-models",
     response_model=IaModelsSyncResponse,
     summary="Payload prêt Fabric pour ia_models",
+    description="Prépare les derniers modèles au format cible de la table Fabric `ia_models`.",
+    response_description="Payload `ia_models` prêt à consommer",
 )
 async def get_latest_models_for_fabric() -> IaModelsSyncResponse:
     """
@@ -324,6 +328,8 @@ async def get_latest_models_for_fabric() -> IaModelsSyncResponse:
     "/list",
     response_model=ModelsListResponse,
     summary="Lister les modèles disponibles",
+    description="Retourne les modèles Prophet disponibles en local par PRM.",
+    response_description="Liste des modèles disponibles",
 )
 async def list_available_models() -> ModelsListResponse:
     """
@@ -378,6 +384,8 @@ async def list_available_models() -> ModelsListResponse:
     "/prm/{prm}",
     response_model=ModelRegistryResponse,
     summary="Lire le modèle actif d’un PRM",
+    description="Récupère le modèle actif pour un PRM (Fabric en priorité, local en secours).",
+    response_description="Modèle actif du PRM",
 )
 async def get_active_model(prm: str) -> ModelRegistryResponse:
     """

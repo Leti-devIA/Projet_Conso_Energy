@@ -20,7 +20,12 @@ router = APIRouter()
 # ROUTE : Health Check
 # ============================================================
 
-@router.get("/health")
+@router.get(
+    "/health",
+    summary="État de l’API",
+    description="Vérifie rapidement que l’API répond.",
+    response_description="API disponible",
+)
 def health() -> dict:
     """
     Endpoint de santé de l'API.

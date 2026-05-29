@@ -52,7 +52,12 @@ def _count_rows(csv_path: Path) -> int:
 # ROUTE : Synchronisation PRM
 # ============================================================
 
-@router.post("/prm/{prm}")
+@router.post(
+    "/prm/{prm}",
+    summary="Synchroniser un PRM",
+    description="Télécharge l’historique Dataclean du PRM et le sauvegarde en CSV local.",
+    response_description="Résultat de la synchronisation",
+)
 def sync_prm(prm: str, _: str = Depends(require_api_key)) -> dict:
     """
     Synchronise l'historique de consommation pour un PRM donné.

@@ -23,6 +23,8 @@ import re
 import sqlite3
 import time
 import random
+import sys
+import os
 from pathlib import Path
 from datetime import timedelta
 
@@ -1773,50 +1775,77 @@ def create_user(username: str, password: str, role: str) -> tuple[bool, str]:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# SIMULATION ENTRAÎNEMENT
+# RÉENTRAÎNEMENT COMPLET
 # ══════════════════════════════════════════════════════════════════════════════
+
+def run_full_retraining_pipeline(prm: str) -> dict:
+    """
+    Exécute le pipeline complet de réentraînement :
+    preprocessing → feature engineering → entraînement Prophet.
+
+    Retourne les vraies métriques obtenues après entraînement :
+    - val_mae, val_rmse, val_mape, val_r2
+    """
+    try:
+        from src.train import train_one_site
+        from src.utils import detect_prms, load_config
+    except Exception as import_exc:
+        st.error(
+            "❌ Impossible de charger le pipeline d'entraînement. "
+            f"Détail: {type(import_exc).__name__}: {import_exc}"
+        )
+        return {}
+
+    try:
+        # Chemins robustes (indépendants du dossier courant)
+        raw_dir = BASE_DIR / "data" / "raw" / "sites"
+        config_path = BASE_DIR / "config" / "config.yaml"
+
+        # Chercher le fichier de données pour ce PRM
+        if not raw_dir.exists():
+            st.error(f"❌ Dossier de données non trouvé : {raw_dir}")
+            return {}
+
+        # Détecter les PRMs disponibles
+        all_prms = detect_prms(raw_dir)
+        if str(prm) not in all_prms:
+            st.error(f"❌ PRM {prm} non trouvé dans les données disponibles")
+            return {}
+
+        data_path = all_prms[str(prm)]
+        config = load_config(str(config_path))
+
+        # Lancer le pipeline complet réel (inclut preprocessing + features + train)
+        st.info(
+            "⏳ Pipeline en cours : preprocessing → feature engineering → entraînement Prophet."
+        )
+        metrics, _model = train_one_site(data_path, config, prm, str(config_path))
+
+        if metrics is None:
+            st.warning("⚠️ L'entraînement n'a pas pu être complété (données insuffisantes ?)")
+            return {}
+
+        # Formatter les métriques pour le dashboard
+        return {
+            "val_mae":  round(metrics["mae"], 1),
+            "val_rmse": round(metrics["rmse"], 1),
+            "val_mape": round(metrics["mape"], 2),
+            "val_r2":   round(metrics["r2"], 4),
+        }
+
+    except Exception as e:
+        st.error(f"❌ Erreur lors de l'entraînement : {str(e)}")
+        import traceback
+        st.error(traceback.format_exc())
+        return {}
+
 
 def simulate_training(prm: str, old_metrics: dict | None) -> dict:
     """
-    Simule un ré-entraînement et retourne des nouvelles métriques.
-    En production, décommenter le bloc httpx ci-dessous et commenter la simulation.
+    Compatibilité historique : lance désormais uniquement le pipeline complet réel.
+    Aucun fallback de simulation n'est effectué.
     """
-    # ── APPEL API RÉEL (décommenter en production) ────────────────────────────
-    # import httpx
-    # try:
-    #     with httpx.Client(timeout=300.0) as client:
-    #         resp = client.post(
-    #             f"{API_TRAIN_URL}/train/{prm}",
-    #             headers={"X-API-Key": "your-api-key"},
-    #         )
-    #     if resp.status_code == 200:
-    #         return resp.json().get("metrics", {})
-    #     else:
-    #         st.error(f"Erreur API entraînement : {resp.status_code} - {resp.text}")
-    #         return {}
-    # except Exception as e:
-    #     st.error(f"Impossible de joindre l'API d'entraînement : {e}")
-    #     return {}
-    # ─────────────────────────────────────────────────────────────────────────
-
-    # ── SIMULATION ─────────────────────────────────────────────────────────────
-    time.sleep(2)  # Simule le temps d'entraînement
-    rng = random.Random(int(prm[-4:]) + int(time.time()) % 1000)
-
-    base_mae  = (old_metrics or {}).get("val_mae",  9000)
-    base_rmse = (old_metrics or {}).get("val_rmse", 13000)
-    base_mape = (old_metrics or {}).get("val_mape", 14)
-    base_r2   = (old_metrics or {}).get("val_r2",   0.90)
-
-    # Amélioration aléatoire entre -5% et +15%
-    improvement = rng.uniform(-0.05, 0.15)
-
-    return {
-        "val_mae":  round(base_mae  * (1 - improvement), 1),
-        "val_rmse": round(base_rmse * (1 - improvement), 1),
-        "val_mape": round(base_mape * (1 - improvement * 0.8), 2),
-        "val_r2":   round(min(0.999, base_r2 + improvement * 0.05), 4),
-    }
+    return run_full_retraining_pipeline(prm)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1927,12 +1956,15 @@ if LOGO_FILE.exists():
 else:
     logo_html = '<div style="font-size:2.2rem;line-height:1">⚡</div>'
 
+_selected_site_for_header = st.session_state.get("selected_site_filter", "Tous les sites")
+_header_site_suffix = "" if _selected_site_for_header == "Tous les sites" else f" - {_selected_site_for_header} -"
+
 st.markdown(f"""
     <div class="global-top-banner">
       <div class="global-top-banner-inner">
         {logo_html}
         <div style="flex:1">
-            <div class="header-kicker">Tableau de bord énergie</div>
+                        <div class="header-kicker">Tableau de bord énergie{_header_site_suffix}</div>
             <div class="header-subtitle">Prévisions de consommation · Prix futur · Suivi des modèles</div>
         </div>
       </div>
@@ -2036,6 +2068,7 @@ with st.sidebar:
         "Site",
         ["Tous les sites"] + site_options,
         index=0,
+        key="selected_site_filter",
         label_visibility="collapsed",
     )
     if selected_site_filter == "Tous les sites":
@@ -2303,7 +2336,7 @@ if not multi_site and chosen_prm:
                 )
     else:
         st.markdown(
-            "<div class='info-subtle'>⚠️ Aucune métrique MLflow disponible pour ce site. "
+            "<div class='info-subtle'>Aucune métrique MLflow disponible pour ce site. "
             "Lancez un premier entraînement pour générer les métriques.</div>",
             unsafe_allow_html=True,
         )
@@ -2318,7 +2351,7 @@ if not multi_site and chosen_prm:
             and not st.session_state.training_accepted
         )
 
-        with st.expander("🔄 Réentraîner le modèle", expanded=False):
+        with st.expander("Réentraîner le modèle", expanded=False):
             st.markdown(
                 f"<div style='font-size:0.92rem;color:var(--muted);margin-bottom:1rem'>"
                 f"Vous êtes connecté en tant qu'<b>administrateur</b>. "
@@ -2330,7 +2363,7 @@ if not multi_site and chosen_prm:
             )
 
             _launch = st.button(
-                "🔄 Lancer le réentraînement" if not _already_trained else "✅ Réentraînement terminé",
+                "Lancer le réentraînement" if not _already_trained else "✅ Réentraînement terminé",
                 use_container_width=True,
                 type="primary",
                 disabled=_already_trained,
@@ -2361,7 +2394,7 @@ if not multi_site and chosen_prm:
                 st.markdown("<div style='margin-top:1rem'></div>", unsafe_allow_html=True)
                 st.markdown(
                     "<div style='font-weight:600;font-size:1rem;margin-bottom:0.8rem'>"
-                    "📊 Comparaison des métriques — Modèle actuel vs Nouveau modèle"
+                    "Comparaison des métriques — Modèle actuel vs Nouveau modèle"
                     "</div>",
                     unsafe_allow_html=True,
                 )
@@ -2429,7 +2462,7 @@ if not multi_site and chosen_prm:
                         st.success("✅ Nouveau modèle enregistré et activé pour ce site !")
                         st.rerun()
                 with _reject_col:
-                    if st.button("🔒 Conserver le modèle actuel", use_container_width=True):
+                    if st.button("Conserver le modèle actuel", use_container_width=True):
                         st.session_state.training_new_metrics = None
                         st.session_state.training_old_metrics = None
                         _mlops_logger.info(f"MODÈLE CONSERVÉ (rejeté) | PRM={chosen_prm}")
@@ -2438,7 +2471,7 @@ if not multi_site and chosen_prm:
     else:
         # Utilisateur non-admin : mention informative
         st.markdown(
-            "<div class='info-subtle' style='margin-top:0.5rem'>🔒 Le réentraînement du modèle est "
+            "<div class='info-subtle' style='margin-top:0.5rem'>Le réentraînement du modèle est "
             "réservé aux <b>administrateurs</b> afin de garantir la stabilité du système de prédiction.</div>",
             unsafe_allow_html=True,
         )
@@ -2459,7 +2492,7 @@ if multi_site:
     </div>""", unsafe_allow_html=True)
 
     if prices_df.empty:
-        st.markdown('<div class="info-subtle">⚠️ Aucune donnée de prix disponible.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="info-subtle">Aucune donnée de prix disponible.</div>', unsafe_allow_html=True)
     else:
         price_priority = ["horaire", "mensuel", "trimestriel", "annuel"]
         monthly_prices = build_monthly_price_series(

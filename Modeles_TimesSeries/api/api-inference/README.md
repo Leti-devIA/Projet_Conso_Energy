@@ -139,6 +139,21 @@ URLs utiles :
 
 ## 7) Endpoints principaux
 
+### Vue d'ensemble
+
+| Méthode | Endpoint | Auth `X-API-Key` | Description |
+|---|---|---|---|
+| GET | `/health` | Non | Vérifie que l'API est opérationnelle (health check technique). |
+| POST | `/sync/prm/{prm}` | Oui | Synchronise un PRM en téléchargeant son CSV depuis `api-dataclean`, puis enregistre le fichier dans `data/raw/sites/`. Retourne le nombre de lignes importées. |
+| POST | `/predict/prm/{prm}` | Oui | Lance une prédiction complète pour un PRM : historique Dataclean → météo future → modèle Prophet → réponse JSON + sauvegarde CSV locale. |
+| GET | `/predictions/prm/{prm}/latest` | Oui | Retourne la dernière prédiction d'un PRM avec fallback progressif : cache mémoire, puis CSV local, puis Fabric ; `force_refresh=true` permet de recalculer. |
+| POST | `/predict/all/regenerate` | Oui | Démarre un job asynchrone de régénération des prédictions pour tous les PRM disposant d'un modèle `_latest.pkl`. |
+| GET | `/predict/all/regenerate/{job_id}` | Oui | Donne l'état d'avancement d'un job de régénération globale (done, ok, failed, durée, erreurs). |
+| GET | `/models/list` | Non | Liste les modèles locaux disponibles détectés dans `models/saved` (fichiers `*_latest.pkl`). |
+| GET | `/models/prm/{prm}` | Non | Retourne le modèle actif pour un PRM (source Fabric si disponible, sinon fallback fichier local). |
+| GET | `/models/latest` | Non | Expose l'ensemble des derniers modèles entraînés, enrichis avec les métriques MLflow. |
+| GET | `/models/latest/ia-models` | Non | Fournit un payload prêt à insérer dans la table Fabric `ia_models` (mapping orienté ingestion). |
+
 ## Santé
 - `GET /health`
 
@@ -176,9 +191,24 @@ curl "http://127.0.0.1:8001/predictions/prm/30000250086126/latest" \
   -H "X-API-Key: dev-inference-key"
 ```
 
+## Régénération globale (protégé)
+- `POST /predict/all/regenerate`
+- Lance un job asynchrone pour recalculer toutes les prédictions disponibles.
+
+Exemple :
+```bash
+curl -X POST "http://127.0.0.1:8001/predict/all/regenerate" \
+  -H "X-API-Key: dev-inference-key"
+```
+
+- `GET /predict/all/regenerate/{job_id}`
+- Retourne le statut détaillé du job (progression, succès/échecs, erreurs).
+
 ## Modèles
 - `GET /models/list` : liste les modèles `_latest.pkl` détectés
-- routes additionnelles dans `/models/*` pour lecture/push registre modèle (selon configuration et droits)
+- `GET /models/prm/{prm}` : retourne le modèle actif pour un PRM
+- `GET /models/latest` : retourne tous les derniers modèles + métriques MLflow
+- `GET /models/latest/ia-models` : payload orienté ingestion Fabric (`ia_models`)
 
 ---
 

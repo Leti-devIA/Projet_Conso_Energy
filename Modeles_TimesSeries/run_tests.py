@@ -12,10 +12,16 @@ Usage:
     python run_tests.py --specific test_utils.py
 """
 
-import subprocess
 import sys
+import subprocess
 import argparse
 from pathlib import Path
+
+def run_pytest(pytest_args):
+    cmd = [sys.executable, "-m", "pytest"] + pytest_args
+    print("Commande:", " ".join(cmd))
+    result = subprocess.run(cmd)
+    return result.returncode
 
 def run_command(cmd, description=""):
     """Exécute une commande shell et retourne le code de sortie."""
@@ -71,8 +77,8 @@ def main():
 
     args = parser.parse_args()
 
-    # Construire la commande pytest
-    cmd = ["python", "-m", "pytest"]
+    # Construire la commande pytest avec l'interpréteur Python actif
+    cmd = [sys.executable, "-m", "pytest"]
 
     # Markers
     if args.unit:

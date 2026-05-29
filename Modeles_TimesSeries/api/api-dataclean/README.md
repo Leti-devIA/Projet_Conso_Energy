@@ -121,6 +121,18 @@ URLs utiles :
 
 ## 7) Endpoints disponibles
 
+### Vue d'ensemble
+
+| Méthode | Endpoint | Description |
+|---|---|---|
+| GET | `/dataclean/allbyprm` | Exporte l'historique d'un PRM au format CSV (`?prm=<PRM_14_chiffres>`). Idéal pour un téléchargement direct et une ouverture dans Excel/BI. |
+| GET | `/dataclean/allbyprm-json` | Retourne l'historique d'un PRM au format JSON (`?prm=<PRM_14_chiffres>`), avec `prm`, `count` et `rows`. Endpoint privilégié pour l'intégration applicative (API → API). |
+| GET | `/dataclean/allbyprm-json-batch` | Retourne l'historique de plusieurs PRM en un seul appel JSON (`?prms=<PRM1>&prms=<PRM2>...`). Réduit le nombre d'appels réseau côté dashboard ou batch de prédiction. |
+| GET | `/dataclean/previsions-meteo` | Exporte les prévisions météo futures au format CSV, utilisées comme variables exogènes pour la prédiction. |
+| GET | `/dataclean/sites` | Exporte la table de référence des sites (dont les PRM associés) au format CSV, utile pour le mapping site ↔ point de livraison. |
+| GET | `/dataclean/prixspot` | Exporte les prix spot de l'électricité au format CSV, utilisés pour les analyses économiques et la projection de coûts. |
+| GET | `/health` | Endpoint de santé de l'API. Permet de vérifier rapidement que le service est opérationnel. |
+
 ### Santé
 - `GET /health`
 
@@ -143,6 +155,14 @@ curl "http://127.0.0.1:8000/dataclean/allbyprm?prm=30000250086126" -o dataclean_
 Exemple :
 ```bash
 curl "http://127.0.0.1:8000/dataclean/allbyprm-json?prm=30000250086126"
+```
+
+### Historique Enedis + météo multi-PRM (JSON batch)
+- `GET /dataclean/allbyprm-json-batch?prms=<PRM_1>&prms=<PRM_2>`
+
+Exemple :
+```bash
+curl "http://127.0.0.1:8000/dataclean/allbyprm-json-batch?prms=30000250086126&prms=30000250086127"
 ```
 
 ### Prévisions météo (CSV)

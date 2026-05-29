@@ -122,19 +122,19 @@ class TestExtractPrmFromName:
 
         return _extract_prm_from_name
 
-    def test_extracts_long_number(self):
+    def test_extrait_un_numero_long(self):
         fn = self._fn()
         assert fn("data_processed_30001234567890.csv") == "30001234567890"
 
-    def test_returns_none_without_number(self):
+    def test_retourne_none_sans_numero(self):
         fn = self._fn()
         assert fn("fichier_sans_prm.csv") is None
 
-    def test_extracts_8_digit_minimum(self):
+    def test_extrait_numero_minimum_huit_chiffres(self):
         fn = self._fn()
         assert fn("site_12345678_data.csv") == "12345678"
 
-    def test_short_number_not_extracted(self):
+    def test_numero_trop_court_non_extrait(self):
         fn = self._fn()
         assert fn("fichier_123.csv") is None
 
@@ -151,16 +151,16 @@ class TestHashPassword:
 
         return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
-    def test_same_input_same_hash(self):
+    def test_meme_entree_meme_hash(self):
         assert self._hash("secret") == self._hash("secret")
 
-    def test_different_inputs_different_hashes(self):
+    def test_entrees_differentes_hash_different(self):
         assert self._hash("abc") != self._hash("def")
 
-    def test_hash_is_64_chars(self):
+    def test_hash_fait_64_caracteres(self):
         assert len(self._hash("any_password")) == 64
 
-    def test_empty_string(self):
+    def test_chaine_vide(self):
         # Ne doit pas lever d'exception
         result = self._hash("")
         assert isinstance(result, str)
@@ -215,26 +215,26 @@ class TestPriceForDatetimes:
 
         return price_for_datetimes
 
-    def test_returns_correct_price_in_range(self, sample_price_df):
+    def test_retourne_prix_correct_dans_intervalle(self, sample_price_df):
         fn = self._fn()
         dates = pd.Series([pd.Timestamp("2025-01-15"), pd.Timestamp("2025-02-10")])
         result = fn(dates, sample_price_df, "prix_base", ["mensuel"])
         assert result.iloc[0] == pytest.approx(80.0)
         assert result.iloc[1] == pytest.approx(85.0)
 
-    def test_returns_nan_outside_range(self, sample_price_df):
+    def test_retourne_nan_hors_intervalle(self, sample_price_df):
         fn = self._fn()
         dates = pd.Series([pd.Timestamp("2024-12-01")])
         result = fn(dates, sample_price_df, "prix_base", ["mensuel"])
         assert pd.isna(result.iloc[0])
 
-    def test_peak_price(self, sample_price_df):
+    def test_prix_peak(self, sample_price_df):
         fn = self._fn()
         dates = pd.Series([pd.Timestamp("2025-03-20")])
         result = fn(dates, sample_price_df, "prix_peak", ["mensuel"])
         assert result.iloc[0] == pytest.approx(120.0)
 
-    def test_empty_price_df(self):
+    def test_dataframe_prix_vide(self):
         fn = self._fn()
         empty_df = pd.DataFrame(
             columns=["date_deb", "date_fin", "prix_base", "prix_peak", "type"]
@@ -264,7 +264,7 @@ def sample_filtered_df():
 
 @pytest.mark.unit
 class TestBuildConsumptionPie:
-    def test_returns_plotly_figure(self, sample_filtered_df):
+    def test_retourne_figure_plotly(self, sample_filtered_df):
         import plotly.express as px
 
         totals = sample_filtered_df.groupby("site_label", as_index=False)[
@@ -280,7 +280,7 @@ class TestBuildConsumptionPie:
 
         assert isinstance(fig, go.Figure)
 
-    def test_pie_has_two_slices(self, sample_filtered_df):
+    def test_camembert_a_deux_parts(self, sample_filtered_df):
         import plotly.express as px
 
         totals = sample_filtered_df.groupby("site_label", as_index=False)[
@@ -294,7 +294,7 @@ class TestBuildConsumptionPie:
 
 @pytest.mark.unit
 class TestBuildConsumptionCurve:
-    def test_returns_figure_single_site(self, sample_filtered_df):
+    def test_retourne_figure_pour_un_site(self, sample_filtered_df):
         import plotly.express as px
         import plotly.graph_objects as go
 
@@ -303,7 +303,7 @@ class TestBuildConsumptionCurve:
         fig = px.line(single, x="datetime", y="puissance_kw", color="legend")
         assert isinstance(fig, go.Figure)
 
-    def test_aggregate_mode_sums_all_sites(self, sample_filtered_df):
+    def test_mode_agrege_somme_tous_les_sites(self, sample_filtered_df):
         """En mode agrégé, la somme des kW doit être >= celle de chaque site."""
         group = sample_filtered_df.groupby("datetime", as_index=False)["puissance_kw"].sum()
         assert group["puissance_kw"].sum() >= sample_filtered_df["puissance_kw"].sum() - 1e-6
@@ -356,7 +356,7 @@ class TestBuildMonthlyPriceSeries:
 
         return build_monthly_price_series
 
-    def test_returns_dataframe(self, sample_price_df):
+    def test_retourne_un_dataframe(self, sample_price_df):
         fn = self._fn()
         result = fn(
             sample_price_df,
@@ -366,7 +366,7 @@ class TestBuildMonthlyPriceSeries:
         )
         assert isinstance(result, pd.DataFrame)
 
-    def test_has_correct_columns(self, sample_price_df):
+    def test_a_les_bonnes_colonnes(self, sample_price_df):
         fn = self._fn()
         result = fn(
             sample_price_df,
@@ -378,7 +378,7 @@ class TestBuildMonthlyPriceSeries:
         assert "prix_base" in result.columns
         assert "prix_peak" in result.columns
 
-    def test_correct_number_of_months(self, sample_price_df):
+    def test_nombre_de_mois_correct(self, sample_price_df):
         fn = self._fn()
         result = fn(
             sample_price_df,
@@ -389,7 +389,7 @@ class TestBuildMonthlyPriceSeries:
         # Janvier, Février, Mars → 3 lignes
         assert len(result) == 3
 
-    def test_empty_returns_empty_df(self):
+    def test_vide_retourne_dataframe_vide(self):
         fn = self._fn()
         empty_df = pd.DataFrame(
             columns=["date_deb", "date_fin", "prix_base", "prix_peak", "type"]
@@ -470,7 +470,7 @@ class TestAuthentication:
 
         return authenticate_user, create_user
 
-    def test_valid_credentials(self, tmp_path):
+    def test_identifiants_valides(self, tmp_path):
         db = tmp_path / "users.db"
         auth, _ = self._setup_db(db)
         user = auth("admin", "admin123")
@@ -478,42 +478,42 @@ class TestAuthentication:
         assert user["username"] == "admin"
         assert user["role"] == "admin"
 
-    def test_invalid_password(self, tmp_path):
+    def test_mot_de_passe_invalide(self, tmp_path):
         db = tmp_path / "users.db"
         auth, _ = self._setup_db(db)
         assert auth("admin", "wrong_password") is None
 
-    def test_unknown_user(self, tmp_path):
+    def test_utilisateur_inconnu(self, tmp_path):
         db = tmp_path / "users.db"
         auth, _ = self._setup_db(db)
         assert auth("inconnu", "abc123") is None
 
-    def test_lecteur_role(self, tmp_path):
+    def test_role_lecteur(self, tmp_path):
         db = tmp_path / "users.db"
         auth, _ = self._setup_db(db)
         user = auth("lecteur", "lecteur123")
         assert user["role"] == "lecteur"
 
-    def test_create_user_success(self, tmp_path):
+    def test_creation_utilisateur_reussie(self, tmp_path):
         db = tmp_path / "users.db"
         auth, create = self._setup_db(db)
         ok, msg = create("nouveau", "password_ok", "lecteur")
         assert ok is True
         assert auth("nouveau", "password_ok") is not None
 
-    def test_create_user_duplicate(self, tmp_path):
+    def test_creation_utilisateur_en_double(self, tmp_path):
         db = tmp_path / "users.db"
         _, create = self._setup_db(db)
         ok, _ = create("admin", "password_ok", "lecteur")
         assert ok is False
 
-    def test_create_user_short_password(self, tmp_path):
+    def test_creation_utilisateur_mot_de_passe_trop_court(self, tmp_path):
         db = tmp_path / "users.db"
         _, create = self._setup_db(db)
         ok, msg = create("newuser", "123", "lecteur")
         assert ok is False
 
-    def test_create_user_invalid_role(self, tmp_path):
+    def test_creation_utilisateur_role_invalide(self, tmp_path):
         db = tmp_path / "users.db"
         _, create = self._setup_db(db)
         ok, _ = create("newuser", "password_ok", "superadmin")
@@ -524,7 +524,7 @@ class TestAuthentication:
 
 @pytest.mark.unit
 class TestBuildYearlyHistogram:
-    def test_returns_figure(self, sample_filtered_df):
+    def test_retourne_figure(self, sample_filtered_df):
         import plotly.express as px
         import plotly.graph_objects as go
 
@@ -534,7 +534,7 @@ class TestBuildYearlyHistogram:
         fig = px.bar(yearly, x="year", y="puissance_kw", color="site_label", barmode="group")
         assert isinstance(fig, go.Figure)
 
-    def test_aggregation_is_positive(self, sample_filtered_df):
+    def test_agregation_est_positive(self, sample_filtered_df):
         df = sample_filtered_df.copy()
         df["year"] = df["datetime"].dt.year.astype(str)
         yearly = df.groupby(["year", "site_label"], as_index=False)["puissance_kw"].sum()

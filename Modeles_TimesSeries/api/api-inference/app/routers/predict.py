@@ -309,7 +309,12 @@ def _build_future_weather_from_history(history_df: pd.DataFrame) -> pd.DataFrame
 # ROUTE 1 : Lancer une prédiction
 # ============================================================
 
-@router.post("/predict/prm/{prm}")
+@router.post(
+    "/predict/prm/{prm}",
+    summary="Lancer une prédiction PRM",
+    description="Exécute le pipeline complet (historique, météo, modèle) pour un PRM.",
+    response_description="Série de prédictions prête pour le dashboard",
+)
 def predict_prm(prm: str, _: str = Depends(require_api_key)) -> dict:
     """
     Lance une prédiction complète pour un PRM.
@@ -347,7 +352,12 @@ def predict_prm(prm: str, _: str = Depends(require_api_key)) -> dict:
 # ROUTE 1B : Régénérer les prédictions de tous les sites
 # ============================================================
 
-@router.post("/predict/all/regenerate")
+@router.post(
+    "/predict/all/regenerate",
+    summary="Régénérer tous les sites",
+    description="Démarre un job asynchrone pour recalculer toutes les prédictions.",
+    response_description="Job de régénération créé",
+)
 def regenerate_all_predictions(
     background_tasks: BackgroundTasks,
     _: str = Depends(require_api_key),
@@ -389,7 +399,12 @@ def regenerate_all_predictions(
     }
 
 
-@router.get("/predict/all/regenerate/{job_id}")
+@router.get(
+    "/predict/all/regenerate/{job_id}",
+    summary="Suivre un job global",
+    description="Retourne l’avancement d’un job de régénération.",
+    response_description="État du job",
+)
 def get_regenerate_status(job_id: str, _: str = Depends(require_api_key)) -> dict:
     """
     Retourne l'état d'avancement d'un job de régénération globale.
@@ -407,7 +422,12 @@ def get_regenerate_status(job_id: str, _: str = Depends(require_api_key)) -> dic
 # ROUTE 2 : Lire la dernière prédiction (Fabric)
 # ============================================================
 
-@router.get("/predictions/prm/{prm}/latest")
+@router.get(
+    "/predictions/prm/{prm}/latest",
+    summary="Lire la dernière prédiction",
+    description="Renvoie la dernière prédiction d’un PRM (cache, CSV local ou Fabric).",
+    response_description="Dernière prédiction disponible",
+)
 def get_latest_prediction(
     prm: str,
     force_refresh: bool = False,

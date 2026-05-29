@@ -19,6 +19,9 @@ markdown_extensions:
 nav:
   - Accueil: index.md
   - Démarrage rapide: QUICK_START.md
+  - Architecture:
+      - Vue d'ensemble du projet: ARCHITECTURE_PROJET.md
+      - Architecture des données: DATA_ARCHITECTURE.md
   - APIs:
       - API Dataclean: API Dataclean.md
       - API Inference: API Inference.md
@@ -26,14 +29,15 @@ nav:
       - Docker & Ngrok: DOCKER_NGROK.md
       - Setup Ngrok: SETUP_NGROK.md
       - CI/CD: GUIDE_CICD.md
+      - Versionning: VERSIONNING.md
   - Machine Learning:
       - Pipeline d'entraînement: PIPELINE_ENTRAINEMENT.md
-      - Modèle Prophet: AMELIORATIONS_PROPHET.md
+      - Modèle Prophet et hyperparamètres: AMELIORATIONS_PROPHET.md
       - Grid Search: GRID_SEARCH_GUIDE.md
       - MLflow: MLFLOW_GUIDE.md
   - Application:
       - Dashboard: DASHBOARD_GUIDE.md
+      - Simulation prix: SIMULATION_PRIX.md
       - Formule coût horaire: FORMULE_COUT_HORAIRE.md
-  - Architecture des données: DATA_ARCHITECTURE.md
   - Tests: TESTING.md
   - MkDocs: MKDOCS_GUIDE.md

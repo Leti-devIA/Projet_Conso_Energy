@@ -1,7 +1,25 @@
 """
 Patterns avancés de test avec pytest.
 
-Ce fichier sert de référence pour les patterns courants en testing.
+Module pédagogique montrant les bonnes pratiques et patterns courants en testing.
+Ce fichier est exclu du run par défaut (voir conftest.py) car il sert de référence.
+
+Patterns couverts :
+1. Tests paramétrés - tester plusieurs cas avec une seule fonction
+2. Markers personnalisés - catégoriser les tests
+3. Setup/Teardown - préparation et nettoyage
+4. Gestion des exceptions - vérifier les erreurs
+5. Fixtures avec paramètres - générer plusieurs variantes
+6. Scopes des fixtures - cycle de vie  (session, module, function)
+7. Fixtures avec autouse - exécution automatique
+8. Mocking - remplacer les dépendances
+9. Approximation des floats - comparaisons numériques
+10. Assertions multiples - vérifier plusieurs conditions
+11. Conditional skip - sauter certains tests selon conditions
+12. xfail - tests attendus en échec
+13. Context managers pour le cleanup
+14. DataFrames pandas - tests spécifiques
+15. Performance - mesurer le temps d'exécution
 """
 
 import pytest
@@ -12,7 +30,7 @@ import time
 
 
 # =====================================================================
-# PATTERN 1 : Parameterized Tests
+# PATTERN 1 : Parameterized Tests (Tests paramétrés)
 # =====================================================================
 class TestParameterized:
     """Tests paramétrés - tester plusieurs cas avec une fonction."""
@@ -23,8 +41,12 @@ class TestParameterized:
         (0, 0),
         (-5, -10),
     ])
-    def test_double_number(self, input_val, expected):
-        """Teste la fonction double pour plusieurs valeurs."""
+    def test_double_nombre(self, input_val, expected):
+        """Teste la fonction double pour plusieurs valeurs.
+
+        @pytest.mark.parametrize crée 4 exécutions du test avec
+        différentes paires (input_val, expected).
+        """
         result = input_val * 2
         assert result == expected
 
@@ -34,42 +56,52 @@ class TestParameterized:
         "30000540191777",
         "30000650805048",
     ])
-    def test_load_different_sites(self, prm):
-        """Teste le chargement pour plusieurs sites."""
+    def test_chargement_sites_differents(self, prm):
+        """Teste le chargement pour plusieurs sites (3 exécutions).
+
+        Chaque PRM (Point de Mesure) sera testé séparément.
+        """
         # Ton code de test ici
         assert len(prm) > 0
 
 
+
 # =====================================================================
-# PATTERN 2 : Test avec marker personnalisé
+# PATTERN 2 : Tests avec markers personnalisés
 # =====================================================================
 @pytest.mark.slow
-def test_slow_operation():
-    """Ce test est marqué comme 'slow'."""
-    # Pour l'exécuter : pytest -m slow
-    # Pour l'éviter   : pytest -m "not slow"
+def test_operation_lente():
+    """Ce test est marqué comme 'slow' (opération lente).
+
+    Exécution :
+    - pytest -m slow              → Lance uniquement ces tests
+    - pytest -m "not slow"        → Ignore ces tests (mode rapide)
+    """
     time.sleep(0.1)
     assert True
 
 
 @pytest.mark.requires_data
-def test_with_actual_data():
-    """Ce test nécessite les vrais fichiers de données."""
-    # Pour l'exécuter : pytest -m requires_data
+def test_avec_donnees_reelles():
+    """Ce test nécessite les vrais fichiers de données.
+
+    Exécution :
+    - pytest -m requires_data     → Lance uniquement ces tests en CI
+    """
     pass
 
 
 # =====================================================================
-# PATTERN 3 : Test avec setup et teardown
+# PATTERN 3 : Tests avec setup et teardown
 # =====================================================================
 class TestWithSetupTeardown:
-    """Tests avec préparation et nettoyage."""
+    """Tests avec préparation et nettoyage des ressources."""
 
     @classmethod
     def setup_class(cls):
         """Exécuté une fois avant tous les tests de la classe."""
         print("\n📋 Setup: Préparation des ressources")
-        cls.expensive_resource = "Resource coûteux à créer"
+        cls.expensive_resource = "Ressource coûteux à créer"
 
     @classmethod
     def teardown_class(cls):
@@ -78,15 +110,17 @@ class TestWithSetupTeardown:
         cls.expensive_resource = None
 
     def setup_method(self):
-        """Exécuté avant chaque test."""
+        """Exécuté avant chaque test individuel."""
+        # Préparation pour chaque test
         self.temp_data = [1, 2, 3]
 
     def teardown_method(self):
-        """Exécuté après chaque test."""
+        """Exécuté après chaque test individuel."""
+        # Nettoyage après chaque test
         self.temp_data = None
 
-    def test_with_resource(self):
-        """Test utilisant la ressource setup."""
+    def test_avec_ressource(self):
+        """Test utilisant la ressource du setup."""
         assert self.expensive_resource is not None
         assert self.temp_data == [1, 2, 3]
 

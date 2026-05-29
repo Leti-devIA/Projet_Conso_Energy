@@ -236,7 +236,7 @@ Les endpoints protégés requièrent l'en-tête HTTP `X-API-Key`.
 | [Grid Search](GRID_SEARCH_GUIDE.md) | Optimisation automatique des hyperparamètres |
 | [MLflow](MLFLOW_GUIDE.md) | Tracking d'expériences, registre de modèles |
 | [Dashboard](DASHBOARD_GUIDE.md) | Visualisation, métriques, coûts |
-| [Tests](TESTING.md) | Tests unitaires, couverture, CI |
-| [CI/CD](GUIDE_CICD.md) | GitHub Actions, déploiement automatique |
+| [Tests](TESTS_DOCUMENTATION.md) | Tests unitaires, couverture, CI |
+| [CI/CD](CICD_DOCUMENTATION.md) | GitHub Actions, déploiement automatique |
 | [Formule coût horaire](FORMULE_COUT_HORAIRE.md) | Calcul financier détaillé |
 | [MkDocs](MKDOCS_GUIDE.md) | Générer et déployer cette documentation |

@@ -8,6 +8,87 @@ from contextlib import asynccontextmanager
 load_dotenv()
 pyodbc.pooling = False
 
+
+def _first_env(*keys: str) -> Optional[str]:
+    for key in keys:
+        value = os.getenv(key)
+        if value is not None and str(value).strip() != "":
+            return str(value).strip()
+    return None
+
+
+def _to_odbc_bool(value: Optional[str], default: str) -> str:
+    if value is None:
+        return default
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return "yes"
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return "no"
+    return default
+
+
+def _get_db_credentials():
+    server = _first_env("DB_SERVER")
+    database = _first_env("DB_DATABASE")
+    username = _first_env("DB_USER", "DB_USERNAME")
+    password = _first_env("DB_PASSWORD")
+    return server, database, username, password
+
+
+def _build_connection_string(authentication: Optional[str]) -> str:
+    server, database, username, password = _get_db_credentials()
+
+    if not all([server, database, username, password]):
+        raise RuntimeError(
+            "Variables DB_SERVER / DB_DATABASE / DB_USER (ou DB_USERNAME) / DB_PASSWORD manquantes"
+        )
+
+    driver = _first_env("DB_DRIVER") or "ODBC Driver 17 for SQL Server"
+    encrypt = _to_odbc_bool(os.getenv("DB_ENCRYPT"), "yes")
+    trust_cert = _to_odbc_bool(os.getenv("DB_TRUST_CERTIFICATE"), "yes")
+
+    parts = [
+        f"DRIVER={{{driver}}}",
+        f"SERVER={server}",
+        f"DATABASE={database}",
+        f"UID={username}",
+        f"PWD={password}",
+        f"Encrypt={encrypt}",
+        f"TrustServerCertificate={trust_cert}",
+        "Connection Timeout=60",
+    ]
+
+    if authentication:
+        parts.insert(3, f"Authentication={authentication}")
+
+    return ";".join(parts) + ";"
+
+
+def _connect_with_fallback(*, autocommit: bool) -> pyodbc.Connection:
+    requested_auth = _first_env("DB_AUTHENTICATION")
+
+    auth_candidates = []
+    if requested_auth:
+        auth_candidates.append(requested_auth)
+    else:
+        auth_candidates.append("ActiveDirectoryPassword")
+    auth_candidates.append(None)
+
+    last_exc: Optional[Exception] = None
+    for auth in auth_candidates:
+        connection_string = _build_connection_string(auth)
+        try:
+            return pyodbc.connect(connection_string, autocommit=autocommit)
+        except pyodbc.Error as exc:
+            last_exc = exc
+            if auth:
+                print(f"⚠️ Connexion ODBC avec Authentication={auth} échouée: {exc}")
+            else:
+                print(f"⚠️ Connexion ODBC sans Authentication explicite échouée: {exc}")
+
+    raise last_exc if last_exc else RuntimeError("Échec de connexion ODBC")
+
 class DatabaseManager:
     def __init__(self):
         self._connection: Optional[pyodbc.Connection] = None
@@ -26,29 +107,17 @@ class DatabaseManager:
                         pass
                     self._connection = None
 
-            server = os.getenv("DB_SERVER")
-            database = os.getenv("DB_DATABASE")
-            username = os.getenv("DB_USER")
-            password = os.getenv("DB_PASSWORD")
+            server, database, username, password = _get_db_credentials()
 
             if not all([server, database, username, password]):
-                print("❌ Missing DB_SERVER, DB_DATABASE, DB_USER, or DB_PASSWORD")
+                print("❌ Missing DB_SERVER, DB_DATABASE, DB_USER/DB_USERNAME, or DB_PASSWORD")
                 return None
 
             print(f"🔄 Connecting to server: {server} / database: {database}")
 
-            connection_string = (
-                f"DRIVER={{ODBC Driver 17 for SQL Server}};"
-                f"SERVER={server};DATABASE={database};"
-                f"Authentication=ActiveDirectoryPassword;"
-                f"UID={os.getenv('DB_USER')};PWD={os.getenv('DB_PASSWORD')};"
-                f"Encrypt=yes;TrustServerCertificate=yes;"
-                f"Connection Timeout=60;"
-            )
-
             try:
                 self._connection = await asyncio.get_event_loop().run_in_executor(
-                    None, pyodbc.connect, connection_string
+                    None, lambda: _connect_with_fallback(autocommit=False)
                 )
                 print("✅ Connected successfully")
                 return self._connection
@@ -115,22 +184,4 @@ def create_new_connection():
       en même temps (pyodbc : 'Connection is busy').
     - Ici, chaque requête SQL a sa propre connexion → plus de conflits.
     """
-    server = os.getenv("DB_SERVER")
-    database = os.getenv("DB_DATABASE")
-    username = os.getenv("DB_USER")
-    password = os.getenv("DB_PASSWORD")
-
-    if not all([server, database, username, password]):
-        raise RuntimeError("Variables DB_SERVER / DB_DATABASE / DB_USER / DB_PASSWORD manquantes")
-
-    connection_string = (
-        f"DRIVER={{ODBC Driver 17 for SQL Server}};"
-        f"SERVER={server};DATABASE={database};"
-        f"Authentication=ActiveDirectoryPassword;"
-        f"UID={username};PWD={password};"
-        f"Encrypt=yes;TrustServerCertificate=yes;"
-        f"MARS_Connection=Yes;"
-        f"Connection Timeout=60;"
-    )
-
-    return pyodbc.connect(connection_string, autocommit=True)
+    return _connect_with_fallback(autocommit=True)

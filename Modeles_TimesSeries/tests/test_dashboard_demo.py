@@ -166,25 +166,30 @@ class TestCheckNegativePredictions:
             )
         return alerts
 
-    def test_no_negatives_returns_empty_list(self, sample_preds_df):
+    def test_sans_negatifs_retourne_liste_vide(self, sample_preds_df):
+        """Teste que sans prédictions négatives, aucune alerte n'est levée."""
         result = self._check_negative_predictions(sample_preds_df)
         assert result == []
 
-    def test_detects_negatives(self, sample_preds_with_negatives):
+    def test_detecte_les_negatifs(self, sample_preds_with_negatives):
+        """Teste que les prédictions négatives sont détectées."""
         result = self._check_negative_predictions(sample_preds_with_negatives)
         assert len(result) > 0
 
-    def test_alert_has_expected_keys(self, sample_preds_with_negatives):
+    def test_alerte_possede_cles_esperees(self, sample_preds_with_negatives):
+        """Teste que chaque alerte contient les clés attendues (site, count, min)."""
         result = self._check_negative_predictions(sample_preds_with_negatives)
         assert "site" in result[0]
         assert "count" in result[0]
         assert "min" in result[0]
 
-    def test_empty_df_returns_empty_list(self):
+    def test_dataframe_vide_retourne_liste_vide(self):
+        """Teste qu'un DataFrame vide retourne une liste vide."""
         result = self._check_negative_predictions(pd.DataFrame())
         assert result == []
 
-    def test_all_negative_flagged(self):
+    def test_tous_negatifs_signales(self):
+        """Teste que tous les prix négatifs sont identifiés."""
         df = pd.DataFrame(
             {
                 "datetime": pd.date_range("2025-01-01", periods=3, freq="h"),
@@ -230,22 +235,26 @@ class TestPurchasedVolumeMwhForYear:
 
         return purchased_volume_mwh_for_year
 
-    def test_full_year_coverage(self, sample_achats_df):
+    def test_couverture_annee_complete(self, sample_achats_df):
+        """Teste le calcul complet du volume d'énergie achetée pour l'année."""
         fn = self._fn()
         result = fn(sample_achats_df, 2025)
         # Les deux périodes couvrent entièrement 2025 → total ~ 2500 MWh
         assert result == pytest.approx(2500.0, rel=0.05)
 
-    def test_empty_df_returns_zero(self):
+    def test_dataframe_vide_retourne_zero(self):
+        """Teste qu'un DataFrame vide retourne 0 MWh."""
         fn = self._fn()
         assert fn(pd.DataFrame(), 2025) == pytest.approx(0.0)
 
-    def test_no_overlap_returns_zero(self, sample_achats_df):
+    def test_pas_chevauchement_retourne_zero(self, sample_achats_df):
+        """Teste qu'aucun chevauchement sur l'année retourne 0 MWh."""
         fn = self._fn()
         result = fn(sample_achats_df, 2023)
         assert result == pytest.approx(0.0)
 
-    def test_partial_overlap(self):
+    def test_chevauchement_partiel(self):
+        """Teste le calcul avec un chevauchement partiel (H2 2025)."""
         fn = self._fn()
         df = pd.DataFrame(
             {
@@ -290,7 +299,8 @@ class TestPriceForDatetimesDemo:
 
         return price_for_datetimes
 
-    def test_priority_monthly_over_quarterly(self):
+    def test_priorite_mensuel_sur_trimestriel(self):
+        """Teste que les prix mensuels sont prioritaires sur les trimestres."""
         fn = self._fn()
         price_df = pd.DataFrame(
             {
@@ -305,7 +315,8 @@ class TestPriceForDatetimesDemo:
         # Prix mensuel (80) doit être prioritaire sur trimestriel (70)
         assert result.iloc[0] == pytest.approx(80.0)
 
-    def test_fallback_to_quarterly_when_no_monthly(self):
+    def test_repli_trimestriel_sans_mensuel(self):
+        """Teste le repli sur les prix trimestriels quand aucun mensuel n'existe."""
         fn = self._fn()
         price_df = pd.DataFrame(
             {
@@ -326,7 +337,10 @@ class TestPriceForDatetimesDemo:
 
 @pytest.mark.unit
 class TestFigPie:
-    def test_returns_figure(self, sample_preds_df):
+    """Tests du graphique camembert (répartition par site)."""
+
+    def test_retourne_figure(self, sample_preds_df):
+        """Teste que la fonction retourne une figure Plotly valide."""
         import plotly.express as px
         import plotly.graph_objects as go
 
@@ -334,7 +348,8 @@ class TestFigPie:
         fig = px.pie(totals, names="site_label", values="puissance_kw", hole=0.38)
         assert isinstance(fig, go.Figure)
 
-    def test_two_sites_gives_two_slices(self, sample_preds_df):
+    def test_deux_sites_donnent_deux_parts(self, sample_preds_df):
+        """Teste que deux sites génèrent deux parts du camembert."""
         import plotly.express as px
 
         totals = sample_preds_df.groupby("site_label", as_index=False)["puissance_kw"].sum()
@@ -348,8 +363,10 @@ class TestFigPie:
 
 @pytest.mark.unit
 class TestFigYearlyBar:
-    def test_energy_kwh_column_created(self, sample_preds_df):
-        """Vérifie que la conversion puissance → énergie est effectuée."""
+    """Tests du graphique en barres (consommation par année et site)."""
+
+    def test_colonne_energie_kwh_creee(self, sample_preds_df):
+        """Teste que la conversion puissance (kW) → énergie (kWh) est effectuée."""
         df = sample_preds_df.sort_values(["site_label", "datetime"]).copy()
         delta_h = (
             df.groupby("site_label")["datetime"]
@@ -363,7 +380,8 @@ class TestFigYearlyBar:
         assert "energy_kwh" in df.columns
         assert (df["energy_kwh"] >= 0).all()
 
-    def test_returns_figure(self, sample_preds_df):
+    def test_retourne_figure(self, sample_preds_df):
+        """Teste que la fonction retourne une figure Plotly valide."""
         import plotly.express as px
         import plotly.graph_objects as go
 
@@ -379,7 +397,8 @@ class TestFigYearlyBar:
         )
         assert isinstance(fig, go.Figure)
 
-    def test_groupby_year_and_site(self, sample_preds_df):
+    def test_groupby_annee_et_site(self, sample_preds_df):
+        """Teste que le groupby par année et site fonctionne correctement."""
         df = sample_preds_df.copy()
         df["year"] = df["datetime"].dt.year.astype(str)
         yearly = df.groupby(["year", "site_label"], as_index=False)["puissance_kw"].sum()
@@ -393,6 +412,8 @@ class TestFigYearlyBar:
 
 @pytest.mark.unit
 class TestBuildMonthlyPriceSeriesDemo:
+    """Tests de la construction de la série de prix mensuel."""
+
     @staticmethod
     def _fn():
         def price_for_datetimes(datetimes, price_df, price_col, priority):
@@ -430,7 +451,8 @@ class TestBuildMonthlyPriceSeriesDemo:
 
         return build_monthly_price_series
 
-    def test_three_months(self, sample_price_df):
+    def test_trois_mois(self, sample_price_df):
+        """Teste que la plage sur 3 mois génère 3 lignes (janvier, février, mars)."""
         fn = self._fn()
         result = fn(
             sample_price_df,
@@ -440,7 +462,8 @@ class TestBuildMonthlyPriceSeriesDemo:
         )
         assert len(result) == 3
 
-    def test_values_match_source(self, sample_price_df):
+    def test_valeurs_correspondent_source(self, sample_price_df):
+        """Teste que les prix correspondent bien aux prix source."""
         fn = self._fn()
         result = fn(
             sample_price_df,
@@ -472,23 +495,27 @@ class TestSimulateTraining:
             "val_r2": min(0.99, 0.80 + improvement),
         }
 
-    def test_returns_dict_with_expected_keys(self):
+    def test_retourne_dict_avec_cles_esperees(self):
+        """Teste que la simulation retourne un dict avec les métriques attendues."""
         result = self._simulate({"val_mae": 5000})
         assert "val_mae" in result
         assert "val_rmse" in result
         assert "val_mape" in result
         assert "val_r2" in result
 
-    def test_mae_improves(self):
+    def test_mae_s_ameliore(self):
+        """Teste que la MAE (erreur absolue moyenne) s'améliore après ré-entraînement."""
         old = {"val_mae": 5000}
         new = self._simulate(old)
         assert new["val_mae"] < old["val_mae"]
 
-    def test_r2_between_0_and_1(self):
+    def test_r2_entre_0_et_1(self):
+        """Teste que le coefficient R² reste entre 0 et 1 (coefficient de détermination)."""
         result = self._simulate(None)
         assert 0.0 <= result["val_r2"] <= 1.0
 
-    def test_works_without_old_metrics(self):
+    def test_fonctionne_sans_anciennes_metriques(self):
+        """Teste que la simulation fonctionne même sans métriques précédentes."""
         result = self._simulate(None)
         assert isinstance(result, dict)
         assert len(result) == 4
