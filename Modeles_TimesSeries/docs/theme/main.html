@@ -13,17 +13,50 @@
       a:hover { text-decoration: underline; }
       code { background: #f3f4f6; padding: 2px 5px; border-radius: 4px; }
       pre code { display: block; padding: 12px; overflow-x: auto; }
-      nav a { margin-right: 12px; }
+
+      /* Nav */
+      nav ul { list-style: none; padding: 0; margin: 8px 0 0 0; display: flex; flex-wrap: wrap; gap: 4px; }
+      nav li { position: relative; }
+      nav > ul > li > a, nav > ul > li > span {
+        display: inline-block; padding: 5px 10px; border-radius: 6px;
+        color: #2563eb; font-weight: 500; cursor: pointer;
+      }
+      nav > ul > li > a:hover, nav > ul > li > span:hover { background: #eff6ff; text-decoration: none; }
+
+      /* Dropdown */
+      nav li ul {
+        display: none; position: absolute; top: 100%; left: 0;
+        background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+        padding: 6px 0; min-width: 220px; z-index: 100;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        flex-direction: column; gap: 0;
+      }
+      nav li:hover > ul { display: flex; }
+      nav li ul a { display: block; padding: 7px 16px; color: #374151; font-weight: 400; }
+      nav li ul a:hover { background: #f3f4f6; text-decoration: none; }
     </style>
   </head>
   <body>
     <header>
       <strong>{{ config.site_name }}</strong>
-      <nav style="margin-top: 8px;">
+      <nav>
         {% if nav %}
-          {% for item in nav %}
-            <a href="{{ item.url|url }}">{{ item.title }}</a>
-          {% endfor %}
+          <ul>
+            {% for item in nav %}
+              <li>
+                {% if item.children %}
+                  <span>{{ item.title }} ▾</span>
+                  <ul>
+                    {% for child in item.children %}
+                      <li><a href="{{ child.url|url }}">{{ child.title }}</a></li>
+                    {% endfor %}
+                  </ul>
+                {% else %}
+                  <a href="{{ item.url|url }}">{{ item.title }}</a>
+                {% endif %}
+              </li>
+            {% endfor %}
+          </ul>
         {% endif %}
       </nav>
     </header>

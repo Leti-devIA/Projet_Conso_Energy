@@ -151,12 +151,12 @@ site_overrides:
     seasonality_mode: multiplicative
     seasonality_prior_scale: 1.0
     holidays_prior_scale: 10
-    daily_fourier_order: 20
-    weekly_fourier_order: 5
+    daily_fourier_order: 5
+    weekly_fourier_order: 20
     yearly_fourier_order: 5
     growth: flat
-    changepoint_prior_scale: 0.5
-    n_changepoints: 25
+    changepoint_prior_scale: 0.1
+    n_changepoints: 10
     changepoint_range: 0.9
   '30000250086126':
     seasonality_mode: multiplicative
@@ -181,26 +181,26 @@ site_overrides:
     n_changepoints: 30
     changepoint_range: 0.85
   '30000650106751':
-    n_changepoints: 10
-    growth: flat
-    changepoint_range: 0.9
-    changepoint_prior_scale: 0.1
-    yearly_fourier_order: 20
-    weekly_fourier_order: 7
-    seasonality_prior_scale: 50
-    seasonality_mode: multiplicative
-    holidays_prior_scale: 10
-    daily_fourier_order: 20
-  '30000540191777':
-    n_changepoints: 10
+    n_changepoints: 5
     growth: flat
     changepoint_range: 0.8
-    changepoint_prior_scale: 0.001
-    daily_fourier_order: 18
-    holidays_prior_scale: 1
+    changepoint_prior_scale: 0.1
+    yearly_fourier_order: 20
+    weekly_fourier_order: 5
+    seasonality_prior_scale: 40
     seasonality_mode: multiplicative
-    seasonality_prior_scale: 1
-    weekly_fourier_order: 3
+    holidays_prior_scale: 10
+    daily_fourier_order: 10
+  '30000540191777':
+    n_changepoints: 25
+    growth: flat
+    changepoint_range: 0.8
+    changepoint_prior_scale: 0.1
+    daily_fourier_order: 5
+    holidays_prior_scale: 20
+    seasonality_mode: multiplicative
+    seasonality_prior_scale: 20
+    weekly_fourier_order: 10
     yearly_fourier_order: 20
 grid_search:
   random_seed: 42

@@ -1,4 +1,4 @@
-# Docker & Ngrok
+# Docker
 
 ## Pourquoi Docker ?
 
@@ -65,7 +65,7 @@ Le profil `local` active deux services supplémentaires : `ngrok` et `ngrok-conf
 docker compose --profile local up -d
 ```
 
-Ce profil est utile quand Microsoft Fabric doit appeler l'API Inference depuis le cloud, sans que vous ayez un serveur public déployé.
+Ce profil est utile quand Microsoft Fabric doit appeler l'API Inference depuis le cloud, sans avoir un serveur public déployé.
 
 ---
 
@@ -101,46 +101,7 @@ Réseau Docker interne (bridge)
 
 ---
 
-## Qu'est-ce que ngrok ?
 
-**ngrok** crée un **tunnel HTTPS public** vers un port local. Concrètement :
-
-- Votre PC fait tourner `api-inference` sur le port 8001.
-- ngrok génère une URL publique du type `https://abc123.ngrok.io`.
-- Fabric (dans le cloud Microsoft) peut appeler cette URL comme si c'était une vraie API déployée.
-
-C'est une solution de développement/démonstration. Elle évite de déployer sur un serveur cloud juste pour tester l'intégration Fabric.
-
-### Schéma de fonctionnement
-
-```
-[Microsoft Fabric (cloud)]
-        │  HTTPS
-        ▼
-[https://abc123.ngrok.io]   ← URL publique ngrok
-        │
-[ngrok agent (Docker)]
-        │
-[api-inference:8001 (local)]
-```
-
----
-
-## Configuration ngrok
-
-### 1. Obtenir un token
-
-1. Créer un compte sur [ngrok.com](https://ngrok.com) (gratuit).
-2. Aller dans le Dashboard → **Your Authtoken**.
-3. Copier le token.
-
-### 2. Configurer le token
-
-```powershell
-ngrok config add-authtoken <votre_token>
-```
-
-Ou définir la variable d'environnement `NGROK_AUTHTOKEN` dans `docker-compose.yml`.
 
 ### 3. Démarrer l'infrastructure
 

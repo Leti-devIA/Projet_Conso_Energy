@@ -326,7 +326,9 @@ def predict_all_sites(model_dir="models/saved", config_path="config/config.yaml"
     """
     Lance la prédiction pour TOUS les sites qui ont un modèle sauvegardé.
 
-    Utilise les moyennes climatiques pour générer la météo future.
+    Utilise les moyennes climatiques pour générer la météo future, puis
+    formate chaque prévision via format_predictions_for_dashboard()
+    avant sauvegarde (colonnes prêtes pour le dashboard).
     """
     from pathlib import Path
     from .generate_climate_averages import generate_climate_averages_pipeline
@@ -393,10 +395,21 @@ def predict_all_sites(model_dir="models/saved", config_path="config/config.yaml"
                 config_path=config_path
             )
 
-            # Sauvegarde
+            # ── Formatage pour dashboard
+            # On récupère la date de début de l'historique de CE site, nécessaire
+            # pour calculer 'jours_depuis_debut' dans format_predictions_for_dashboard.
+            historique_dates = pd.read_csv(historique_path, usecols=["datetime"])
+            historique_start = pd.to_datetime(historique_dates["datetime"]).min()
+
+            df_dashboard = format_predictions_for_dashboard(
+                df_predictions,
+                historique_start=historique_start
+            )
+
+            # Sauvegarde (format dashboard, pas le df brut yhat/yhat_lower/yhat_upper)
             output_path = pred_dir / f"predictions_{years}ans_{prm}.csv"
-            df_predictions.to_csv(output_path, index=False)
-            print(f"   💾 Sauvegardé : {output_path.name}")
+            df_dashboard.to_csv(output_path, index=False)
+            print(f"   💾 Sauvegardé (format dashboard) : {output_path.name}")
             results[prm] = f"✅ {output_path.name}"
 
         except Exception as e:

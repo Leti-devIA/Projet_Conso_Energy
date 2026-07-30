@@ -1,5 +1,5 @@
 """
-Générateur de climat synthétique long terme (support de formation).
+Générateur de climat synthétique long terme.
 
 Ce module crée une météo future "plausible" pour tester les scénarios long terme,
 en combinant climatologie, variabilité, tendance et événements extrêmes simulés.

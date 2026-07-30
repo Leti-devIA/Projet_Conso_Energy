@@ -23,11 +23,11 @@ nav:
       - Vue d'ensemble du projet: ARCHITECTURE_PROJET.md
       - Architecture des données: DATA_ARCHITECTURE.md
   - APIs:
-      - API Dataclean: API Dataclean.md
-      - API Inference: API Inference.md
+      - API Dataclean: API_Dataclean.md
+      - API Inference: API_Inference.md
   - Infrastructure:
-      - Docker & Ngrok: DOCKER_NGROK.md
-      - Setup Ngrok: SETUP_NGROK.md
+      - Docker: DOCKER.md
+      - Ngrok: NGROK.md
       - CI/CD: GUIDE_CICD.md
       - Versionning: VERSIONNING.md
   - Machine Learning:

@@ -230,7 +230,7 @@ Les endpoints protégés requièrent l'en-tête HTTP `X-API-Key`.
 |---|---|
 | [API Dataclean](API Dataclean.md) | Architecture, endpoints, configuration |
 | [API Inference](API Inference.md) | Pipeline ML, sécurité, endpoints |
-| [Docker & Ngrok](DOCKER_NGROK.md) | Orchestration, tunnels, Docker Compose |
+| [Docker & Ngrok](DOCKER.md) | Orchestration, tunnels, Docker Compose |
 | [Pipeline d'entraînement](PIPELINE_ENTRAINEMENT.md) | Preprocessing, features, train, predict |
 | [Modèle Prophet](AMELIORATIONS_PROPHET.md) | Fonctionnement, hyperparamètres, améliorations |
 | [Grid Search](GRID_SEARCH_GUIDE.md) | Optimisation automatique des hyperparamètres |

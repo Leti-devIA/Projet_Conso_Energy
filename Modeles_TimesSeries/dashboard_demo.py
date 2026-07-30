@@ -735,7 +735,7 @@ def load_sites() -> pd.DataFrame:
 def load_predictions() -> pd.DataFrame:
     if not PRED_DIR.exists():
         return pd.DataFrame()
-    csv_files = sorted(PRED_DIR.glob("*.csv"))
+    csv_files = sorted(PRED_DIR.glob("predictions_3ans_*.csv"))
     if not csv_files:
         return pd.DataFrame()
 
@@ -1842,10 +1842,68 @@ def run_full_retraining_pipeline(prm: str) -> dict:
 
 def simulate_training(prm: str, old_metrics: dict | None) -> dict:
     """
-    Compatibilité historique : lance désormais uniquement le pipeline complet réel.
-    Aucun fallback de simulation n'est effectué.
+    Simulation de réentraînement pour le dashboard de démo.
+    Génère des métriques plausibles sans lancer le pipeline réel.
     """
-    return run_full_retraining_pipeline(prm)
+    # Petite latence pour reproduire une expérience "entraînement"
+    time.sleep(1.4)
+
+    # Seed stable par PRM et par heure pour une démo reproductible mais vivante
+    _seed = f"{prm}-{pd.Timestamp.now().strftime('%Y%m%d%H')}"
+    rng = random.Random(_seed)
+
+    # Bornes de sécurité pour garder des métriques réalistes
+    def _clip(v: float, lo: float, hi: float) -> float:
+        return max(lo, min(hi, v))
+
+    if old_metrics:
+        old_mae = float(old_metrics.get("val_mae", 60.0))
+        old_rmse = float(old_metrics.get("val_rmse", max(old_mae * 1.25, 75.0)))
+        old_mape = float(old_metrics.get("val_mape", 11.0))
+        old_r2 = float(old_metrics.get("val_r2", 0.90))
+
+        # Scénario probabiliste : amélioration majoritaire, parfois stable, rarement dégradation
+        scenario = rng.choices(
+            population=["improve", "stable", "degrade"],
+            weights=[0.62, 0.28, 0.10],
+            k=1,
+        )[0]
+
+        if scenario == "improve":
+            mae = old_mae * (1.0 - rng.uniform(0.03, 0.12))
+            rmse = old_rmse * (1.0 - rng.uniform(0.02, 0.10))
+            mape = old_mape * (1.0 - rng.uniform(0.03, 0.14))
+            r2 = old_r2 + rng.uniform(0.006, 0.04)
+        elif scenario == "stable":
+            mae = old_mae * rng.uniform(0.98, 1.03)
+            rmse = old_rmse * rng.uniform(0.98, 1.03)
+            mape = old_mape * rng.uniform(0.97, 1.04)
+            r2 = old_r2 + rng.uniform(-0.008, 0.012)
+        else:
+            mae = old_mae * (1.0 + rng.uniform(0.02, 0.09))
+            rmse = old_rmse * (1.0 + rng.uniform(0.02, 0.10))
+            mape = old_mape * (1.0 + rng.uniform(0.03, 0.14))
+            r2 = old_r2 - rng.uniform(0.006, 0.04)
+
+        # Cohérence statistique minimale: RMSE >= MAE
+        rmse = max(rmse, mae * rng.uniform(1.08, 1.35))
+    else:
+        # Cas premier entraînement (pas d'historique): valeurs plausibles et corrélées
+        mae = rng.uniform(38.0, 92.0)
+        rmse = mae * rng.uniform(1.12, 1.42)
+        mape = rng.uniform(5.5, 17.5)
+        r2 = _clip(0.99 - (mape / 22.0) + rng.uniform(-0.03, 0.02), 0.72, 0.97)
+
+    simulated_metrics = {
+        "val_mae": round(_clip(mae, 5.0, 250.0), 1),
+        "val_rmse": round(_clip(rmse, 8.0, 320.0), 1),
+        "val_mape": round(_clip(mape, 0.1, 90.0), 2),
+        "val_r2": round(_clip(r2, -1.0, 0.9999), 4),
+    }
+
+    _mlops_logger.info(f"SIMULATION RÉENTRAÎNEMENT | PRM={prm} | métriques={simulated_metrics}")
+    st.info("🧪 Mode démo : métriques simulées (aucun entraînement réel lancé).")
+    return simulated_metrics
 
 
 # ══════════════════════════════════════════════════════════════════════════════
